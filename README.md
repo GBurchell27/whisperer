@@ -1,59 +1,80 @@
 # Whisperer
 
-Whisperer is a Python application that records audio when a specific key is held down, and sends the audio to OpenAI's Whisper ASR system for transcription when another key is tapped. It then types the transcription into the active window.
+Push-to-talk dictation for your desktop. Hold **right Ctrl**, speak, release — the audio is transcribed (OpenAI API or a local Whisper model) and pasted at your cursor, wherever it is.
 
-## Prerequisites
+## Requirements
 
-- Python 3
-- OpenAI API key
+- Python 3.11+
+- An OpenAI API key (not needed if you only use the local backend without translation)
 
-## Dependencies
-
-- sounddevice
-- numpy
-- openai
-- pynput
-- scipy
-- pyperclip
-
-You can install these dependencies using pip:
+## Install
 
 ```
-pip install sounddevice numpy openai pynput scipy pyperclip
+pip install .
 ```
 
-On Linux, also run:
+To also enable the offline backend (faster-whisper):
 
 ```
-sudo apt-get install xclip
+pip install .[local]
 ```
 
-## Setup
+## API key
 
-1. Clone the repository.
-2. Create a file named openai_api_key.txt in the root directory of the project.
-3. Paste your OpenAI API key into openai_api_key.txt.
+Whisperer looks for the key in this order:
 
+1. The `OPENAI_API_KEY` environment variable.
+2. A `.env` file in the directory you run from, containing `OPENAI_API_KEY=sk-...`
+3. A legacy `openai_api_key.txt` file containing just the key.
+
+## Launch from Win+R (no admin required)
+
+`MyWhisper.cmd` starts the app from the repo folder (so the `.env` is found). To make **Win+R → `MyWhisper`** work, register it once in the per-user App Paths registry key:
+
+```
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\MyWhisper.exe" /ve /t REG_SZ /d "<full path to MyWhisper.cmd>" /f
+```
+
+This writes only to HKEY_CURRENT_USER, so no admin rights are needed. Remove it with `reg delete` on the same key.
 
 ## Usage
 
-Run whisperer.py to start the application.
-
 ```
-python whisperer.py
+whisperer            # transcribe via the OpenAI API
+whisperer --local    # transcribe offline with faster-whisper
 ```
 
-To quit the application, press ctrl + c.
+(Equivalently: `python -m whisperer`.)
 
-- Hold down right ctrl button to start recording audio.
-- Release right ctrl button to stop recording audio.
+- **Hold right Ctrl** to record; **release** to transcribe and paste at your cursor.
+- **Tap right Shift while recording** to translate the transcript (Quebec French by default).
+- **Quick-tap right Ctrl** before recording to keep the next transcript on the clipboard after pasting (normally your previous clipboard contents are restored).
+- Say **"New paragraph."** to insert a blank line.
+- Recordings shorter than 1 second are discarded.
+- **Ctrl+C** in the console quits.
 
-If you want to translate the recorded audio to French, tap the right shift button while recording
+## Configuration
+
+All settings can be overridden by creating a `whisperer.toml` in the directory you run from. Defaults:
+
+```toml
+record_key = "ctrl_r"
+translate_key = "shift_r"
+sample_rate = 16000
+min_duration_seconds = 1.0
+tap_duration_seconds = 0.5
+transcription_model = "gpt-4o-mini-transcribe"
+translation_model = "gpt-4o-mini"
+local_model_size = "small.en"
+use_local_backend = false
+transcription_prompt = "How are you doing today? I'm really looking forward to seeing you again!"
+translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
+```
+
+Key names are pynput names (`ctrl_r`, `alt_r`, `f13`, …) or a single character.
 
 ## Notes
 
-- The audio is recorded at a sample rate of 16000 Hz and saved as output.wav.
-- The application only records while the record key is held down.
-- The application only sends audio to Whisper when the translate key is tapped.
-- The application does not transcribe audio that is less than 1 second long.
-- The application does not handle errors from the Whisper API.
+- Audio is captured at 16 kHz mono and sent to the API as an in-memory FLAC — nothing is written to disk.
+- Transcription runs on a background thread, so the hotkeys stay responsive.
+- On Linux, `pyperclip` needs `xclip`: `sudo apt-get install xclip`.

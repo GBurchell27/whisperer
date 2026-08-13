@@ -1,3 +1,8 @@
 output.wav
 output.flac
 openai_api_key.txt
+.env
+whisperer.toml
+__pycache__/
+*.egg-info/
+.venv/

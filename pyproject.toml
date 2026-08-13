@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisperer"
+version = "2.0.0"
+description = "Push-to-talk dictation: hold a key, speak, release, and the transcript is pasted at your cursor."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "openai>=1.30",
+    "pynput",
+    "pyperclip",
+    "sounddevice",
+    "soundfile",
+]
+
+[project.optional-dependencies]
+local = ["faster-whisper"]
+
+[project.scripts]
+whisperer = "whisperer.app:main"
+
+[tool.setuptools.packages.find]
+include = ["whisperer*"]
