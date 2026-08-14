@@ -6,19 +6,30 @@ from openai import OpenAI
 
 
 class TranslationManager:
-    """Translates transcript text using a chat model and a configurable system prompt."""
+    """Rewrites transcript text using a chat model and a system prompt."""
 
-    def __init__(self, client: OpenAI, model: str, system_prompt: str) -> None:
+    def __init__(
+        self,
+        client: OpenAI,
+        model: str,
+        system_prompt: str,
+        reasoning_effort: str = "",
+    ) -> None:
         self._client = client
         self._model = model
         self._system_prompt = system_prompt
+        self._reasoning_effort = reasoning_effort
 
-    def translate(self, text: str) -> str:
-        response = self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": self._system_prompt},
+    def rewrite(self, text: str, system_prompt: str | None = None) -> str:
+        prompt = system_prompt if system_prompt is not None else self._system_prompt
+        request: dict = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": text},
             ],
-        )
+        }
+        if self._reasoning_effort:
+            request["reasoning_effort"] = self._reasoning_effort
+        response = self._client.chat.completions.create(**request)
         return (response.choices[0].message.content or "").strip()

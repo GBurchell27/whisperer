@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import sounddevice as sd
 
@@ -9,8 +11,13 @@ import sounddevice as sd
 class AudioRecorder:
     """Records mono audio from the default input device between start() and stop()."""
 
-    def __init__(self, sample_rate: int) -> None:
+    def __init__(
+        self,
+        sample_rate: int,
+        on_status: Callable[[str], None] | None = None,
+    ) -> None:
         self._sample_rate = sample_rate
+        self._on_status = on_status
         self._stream: sd.InputStream | None = None
         self._chunks: list[np.ndarray] = []
 
@@ -39,7 +46,7 @@ class AudioRecorder:
         return np.concatenate(self._chunks, axis=0).flatten().astype(np.float32)
 
     def _on_audio_chunk(self, indata: np.ndarray, frames, time, status) -> None:
-        if status:
-            print(f"Audio input status: {status}")
+        if status and self._on_status:
+            self._on_status(str(status))
         if indata.shape[1] == 1:
             self._chunks.append(indata.copy())

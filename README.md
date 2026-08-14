@@ -48,6 +48,7 @@ whisperer --local    # transcribe offline with faster-whisper
 
 - **Hold right Ctrl** to record; **release** to transcribe and paste at your cursor.
 - **Tap right Shift while recording** to translate the transcript (Quebec French by default).
+- **Tap E while recording** to rewrite the transcript as a succinct email.
 - **Quick-tap right Ctrl** before recording to keep the next transcript on the clipboard after pasting (normally your previous clipboard contents are restored).
 - Say **"New paragraph."** to insert a blank line.
 - Recordings shorter than 1 second are discarded.
@@ -55,23 +56,28 @@ whisperer --local    # transcribe offline with faster-whisper
 
 ## Configuration
 
-All settings can be overridden by creating a `whisperer.toml` in the directory you run from. Defaults:
+Copy `whisperer.toml.example` to `whisperer.toml` in the directory you run from (the repo folder if you use `MyWhisper.cmd`), then edit and restart. Every setting is optional; missing keys keep the built-in defaults.
 
 ```toml
 record_key = "ctrl_r"
 translate_key = "shift_r"
+email_key = "e"
 sample_rate = 16000
 min_duration_seconds = 1.0
 tap_duration_seconds = 0.5
 transcription_model = "gpt-4o-mini-transcribe"
-translation_model = "gpt-4o-mini"
+translation_model = "gpt-5.6-luna"
+rewrite_reasoning_effort = "low"
 local_model_size = "small.en"
 use_local_backend = false
 transcription_prompt = "How are you doing today? I'm really looking forward to seeing you again!"
 translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
+email_system_prompt = "Turn the spoken transcript into a succinct email. Output only a one-line subject prefixed with 'Subject: ', a blank line, and a short body of at most a few sentences. Do not add a greeting, sign-off, or commentary unless the speaker included one. Preserve the speaker's intent, names, facts, and requests. Be concise."
 ```
 
 Key names are pynput names (`ctrl_r`, `alt_r`, `f13`, …) or a single character.
+
+Rewrite uses OpenAI [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) (`gpt-5.6-luna`) by default — the cost-optimized GPT-5.6 tier. `rewrite_reasoning_effort` can be `none`, `low`, `medium`, `high`, `xhigh`, or `max`. Use `low` for fast email/translate; set it to `""` if you switch `translation_model` back to a non-reasoning model such as `gpt-4o-mini`.
 
 ## Notes
 

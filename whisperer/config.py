@@ -18,11 +18,13 @@ class WhispererConfig:
 
     record_key: str = "ctrl_r"
     translate_key: str = "shift_r"
+    email_key: str = "e"
     sample_rate: int = 16000
     min_duration_seconds: float = 1.0
     tap_duration_seconds: float = 0.5
     transcription_model: str = "gpt-4o-mini-transcribe"
-    translation_model: str = "gpt-4o-mini"
+    translation_model: str = "gpt-5.6-luna"
+    rewrite_reasoning_effort: str = "low"
     local_model_size: str = "small.en"
     transcription_prompt: str = (
         "How are you doing today? I'm really looking forward to seeing you again!"
@@ -30,6 +32,13 @@ class WhispererConfig:
     translation_system_prompt: str = (
         "You translate the input text to Quebec French using 'vous'. "
         "You only output the text and nothing else."
+    )
+    email_system_prompt: str = (
+        "Turn the spoken transcript into a succinct email. "
+        "Output only a one-line subject prefixed with 'Subject: ', a blank line, "
+        "and a short body of at most a few sentences. "
+        "Do not add a greeting, sign-off, or commentary unless the speaker included one. "
+        "Preserve the speaker's intent, names, facts, and requests. Be concise."
     )
     use_local_backend: bool = False
 
