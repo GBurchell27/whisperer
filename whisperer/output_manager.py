@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 import pyperclip
@@ -28,10 +29,11 @@ class OutputManager:
             pyperclip.copy(previous_clipboard)
 
     def _press_paste_shortcut(self) -> None:
-        self._keyboard.press(Key.ctrl)
+        modifier = Key.cmd if sys.platform == "darwin" else Key.ctrl
+        self._keyboard.press(modifier)
         self._keyboard.press("v")
         self._keyboard.release("v")
-        self._keyboard.release(Key.ctrl)
+        self._keyboard.release(modifier)
 
     def _read_clipboard(self) -> str | None:
         try:

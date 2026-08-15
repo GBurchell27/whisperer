@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -12,11 +13,16 @@ API_KEY_FILE = Path("openai_api_key.txt")
 ENV_FILE = Path(".env")
 
 
+def default_record_key() -> str:
+    """Use the native modifier for the platform: Command on macOS, Ctrl elsewhere."""
+    return "cmd_r" if sys.platform == "darwin" else "ctrl_r"
+
+
 @dataclass(frozen=True)
 class WhispererConfig:
     """All tunable settings; every field can be overridden in whisperer.toml."""
 
-    record_key: str = "ctrl_r"
+    record_key: str = default_record_key()
     translate_key: str = "shift_r"
     email_key: str = "e"
     sample_rate: int = 16000
