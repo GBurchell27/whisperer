@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "whisperer"
 version = "2.0.0"
-description = "Push-to-talk dictation: hold a key, speak, release, and the transcript is pasted at your cursor."
+description = "Toggle dictation: press Ctrl+M to record, press again to transcribe and paste at your cursor."
 requires-python = ">=3.11"
 dependencies = [
     "numpy",

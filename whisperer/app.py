@@ -45,7 +45,7 @@ class WhispererApp:
 
     def run(self) -> None:
         listener = HotkeyListener(
-            record_key=parse_key(self._config.record_key),
+            record_key=self._config.record_key,
             on_record_start=self._start_recording,
             on_record_stop=self._stop_recording,
             recording_taps={
@@ -65,7 +65,7 @@ class WhispererApp:
         )
         self._log.info(
             "ready",
-            f"hold {self._config.record_key} | "
+            f"press {self._config.record_key} to start/stop recording | "
             f"tap {self._config.translate_key} to translate | "
             f"tap {self._config.email_key} for email | Ctrl+C quits",
         )
@@ -92,7 +92,7 @@ class WhispererApp:
             self._keep_next_on_clipboard = True
             self._log.info(
                 "record",
-                f"stopped  {duration_seconds:.1f}s  quick tap -> keep next on clipboard",
+                f"stopped  {duration_seconds:.1f}s  short recording -> keep next on clipboard",
             )
             return
         if duration_seconds < self._config.min_duration_seconds:
@@ -176,7 +176,7 @@ class WhispererApp:
 def _parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="whisperer",
-        description="Hold a key to dictate; the transcript is pasted at your cursor.",
+        description="Press Ctrl+M to start dictating; press again to transcribe and paste.",
     )
     parser.add_argument(
         "--local",

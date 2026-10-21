@@ -16,7 +16,7 @@ ENV_FILE = Path(".env")
 class WhispererConfig:
     """All tunable settings; every field can be overridden in whisperer.toml."""
 
-    record_key: str = "ctrl_r"
+    record_key: str = "<ctrl>+m"
     translate_key: str = "shift_r"
     email_key: str = "e"
     sample_rate: int = 16000

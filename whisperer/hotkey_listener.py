@@ -1,11 +1,11 @@
-"""Global hotkey handling: a hold-to-record key and optional taps while recording."""
+"""Global hotkey handling: toggle recording and optional taps while recording."""
 
 from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Mapping
 
-from pynput.keyboard import Key, KeyCode, Listener
+from pynput.keyboard import HotKey, Key, KeyCode, Listener
 
 
 def parse_key(key_name: str) -> Key | KeyCode:
@@ -68,16 +68,21 @@ class HotkeyListener:
 
     def __init__(
         self,
-        record_key: Key | KeyCode,
+        record_key: str,
         on_record_start: Callable[[], None],
         on_record_stop: Callable[[], None],
         recording_taps: Mapping[Key | KeyCode, Callable[[], None]] | None = None,
     ) -> None:
-        self._record_key = record_key
+        record_keys = (
+            HotKey.parse(record_key) if "+" in record_key else [parse_key(record_key)]
+        )
+        self._record_hotkey = HotKey(
+            [self._normalize_key(key) for key in record_keys], self._toggle_recording
+        )
         self._on_record_start = on_record_start
         self._on_record_stop = on_record_stop
         self._recording_taps = dict(recording_taps or {})
-        self._record_key_down = False
+        self._recording = False
         self._listener: Listener | None = None
         self._suppressed_vks = {
             vk
@@ -98,24 +103,50 @@ class HotkeyListener:
             self._listener.join()
 
     def _on_press(self, key: Key | KeyCode | None) -> None:
-        if keys_match(key, self._record_key) and not self._record_key_down:
-            self._record_key_down = True
-            self._on_record_start()
+        if key is None:
             return
-        if not self._record_key_down:
-            return
-        for tap_key, callback in self._recording_taps.items():
-            if keys_match(key, tap_key):
-                callback()
-                return
+        self._record_hotkey.press(self._normalize_key(key))
+        if self._recording:
+            for tap_key, callback in self._recording_taps.items():
+                if keys_match(key, tap_key):
+                    callback()
+                    return
 
     def _on_release(self, key: Key | KeyCode | None) -> None:
-        if keys_match(key, self._record_key) and self._record_key_down:
-            self._record_key_down = False
+        if key is not None:
+            self._record_hotkey.release(self._normalize_key(key))
+
+    def _toggle_recording(self) -> None:
+        if self._recording:
             self._on_record_stop()
+            self._recording = False
+        else:
+            self._on_record_start()
+            self._recording = True
+
+    @staticmethod
+    def _normalize_key(key: Key | KeyCode) -> Key | KeyCode:
+        for modifier, variants in (
+            (Key.ctrl, (Key.ctrl, Key.ctrl_l, Key.ctrl_r)),
+            (Key.alt, (Key.alt, Key.alt_l, Key.alt_r)),
+            (Key.shift, (Key.shift, Key.shift_l, Key.shift_r)),
+            (Key.cmd, (Key.cmd, Key.cmd_l, Key.cmd_r)),
+        ):
+            if key in variants:
+                return modifier
+        if isinstance(key, KeyCode):
+            # Windows can report Ctrl+M as '\r' (or with no character).
+            # The virtual key still identifies the physical letter key.
+            if key.vk is not None and 65 <= key.vk <= 90:
+                return KeyCode.from_char(chr(key.vk).lower())
+            if key.char is not None:
+                return KeyCode.from_char(key.char.lower())
+        if isinstance(key, Key):
+            return KeyCode.from_vk(key.value.vk)
+        return key
 
     def _win32_event_filter(self, _msg, data) -> bool:
-        if self._record_key_down and data.vkCode in self._suppressed_vks:
+        if self._recording and data.vkCode in self._suppressed_vks:
             if self._listener is not None:
                 self._listener.suppress_event()
         return True
