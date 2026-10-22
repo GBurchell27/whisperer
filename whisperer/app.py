@@ -163,16 +163,31 @@ class WhispererApp:
         self, audio: np.ndarray, rewrite_mode: str | None, keep_on_clipboard: bool
     ) -> None:
         failed = False
+        started = time.perf_counter()
+        stage = "transcription"
+        stage_started = started
+        timings: dict[str, float] = {}
         try:
             transcript = self._transcribe(audio)
+            timings[stage] = time.perf_counter() - stage_started
             if rewrite_mode:
+                stage = "rewrite"
+                stage_started = time.perf_counter()
                 transcript = self._rewrite_or_warn(transcript, rewrite_mode)
+                timings[stage] = time.perf_counter() - stage_started
+            stage = "paste"
+            stage_started = time.perf_counter()
             self._paste_or_skip(transcript, keep_on_clipboard)
+            timings[stage] = time.perf_counter() - stage_started
         except Exception as error:  # keep the hotkey loop alive whatever goes wrong
             failed = True
-            self._log.error("failed", f"{type(error).__name__}: {error}")
+            timings[stage] = time.perf_counter() - stage_started
+            self._log.error("failed", f"{stage}: {type(error).__name__}: {error}")
         finally:
             self._status.processing_finished(failed=failed)
+            elapsed = time.perf_counter() - started
+            breakdown = "  ".join(f"{name}={seconds:.1f}s" for name, seconds in timings.items())
+            self._log.info("timing", f"total={elapsed:.1f}s  {breakdown}")
 
     def _transcribe(self, audio: np.ndarray) -> str:
         duration_seconds = len(audio) / self._config.sample_rate
@@ -283,7 +298,7 @@ def main() -> None:
         ),
         transcriber=_build_transcriber(config, client, logger),
         translator=translator,
-        output=OutputManager(),
+        output=OutputManager(config.record_key),
         logger=logger,
     )
     app.run(show_overlay=not arguments.no_overlay)

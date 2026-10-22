@@ -1,9 +1,10 @@
+import sys
 import unittest
 from unittest.mock import Mock, patch
 
 from pynput.keyboard import Key, KeyCode
 
-from whisperer.hotkey_listener import HotkeyListener
+from whisperer.hotkey_listener import HotkeyListener, _SelectiveListener
 
 
 class HotkeyListenerTests(unittest.TestCase):
@@ -94,15 +95,15 @@ class HotkeyListenerTests(unittest.TestCase):
         self.listener._listener = Mock()
         event = Mock(vkCode=Key.shift_r.value.vk)
         self.listener._win32_event_filter(0, event)
-        self.listener._listener.suppress_event.assert_not_called()
+        self.assertFalse(self.listener._listener.suppress_current_event)
         self.press_shortcut()
         self.release_shortcut()
         self.listener._win32_event_filter(0, event)
-        self.listener._listener.suppress_event.assert_called_once_with()
+        self.assertTrue(self.listener._listener.suppress_current_event)
         self.press_shortcut()
         self.release_shortcut()
         self.listener._win32_event_filter(0, event)
-        self.listener._listener.suppress_event.assert_called_once_with()
+        self.assertFalse(self.listener._listener.suppress_current_event)
 
     def test_custom_shortcut_modifiers_and_special_keys(self):
         for shortcut, keys in (
@@ -130,7 +131,7 @@ class HotkeyListenerTests(unittest.TestCase):
                 stop.assert_called_once_with()
 
     def test_background_listener_starts_and_stops_cleanly(self):
-        with patch("whisperer.hotkey_listener.Listener") as listener:
+        with patch("whisperer.hotkey_listener._SelectiveListener") as listener:
             self.listener.start()
             listener.return_value.start.assert_called_once_with()
             listener.return_value.wait.assert_called_once_with()
@@ -144,6 +145,39 @@ class HotkeyListenerTests(unittest.TestCase):
         self.listener._listener.join.side_effect = RuntimeError("Callback failed")
         with self.assertRaisesRegex(RuntimeError, "Callback failed"):
             self.listener.check()
+
+    def test_record_shortcut_is_suppressed_but_plain_m_is_not(self):
+        for ctrl_vk in (0xA2, 0xA3):
+            with self.subTest(ctrl_vk=ctrl_vk):
+                self.listener._listener = Mock()
+                self.listener._win32_event_filter(0x100, Mock(vkCode=77))
+                self.assertFalse(self.listener._listener.suppress_current_event)
+                self.listener._win32_event_filter(0x101, Mock(vkCode=77))
+                self.listener._win32_event_filter(0x100, Mock(vkCode=ctrl_vk))
+                self.assertFalse(self.listener._listener.suppress_current_event)
+                self.listener._win32_event_filter(0x100, Mock(vkCode=77))
+                self.assertTrue(self.listener._listener.suppress_current_event)
+                # Releasing Ctrl first must still suppress M's paired key-up.
+                self.listener._win32_event_filter(0x101, Mock(vkCode=ctrl_vk))
+                self.listener._win32_event_filter(0x101, Mock(vkCode=77))
+                self.assertTrue(self.listener._listener.suppress_current_event)
+                self.listener._win32_event_filter(0x100, Mock(vkCode=77))
+                self.assertFalse(self.listener._listener.suppress_current_event)
+                self.listener._win32_event_filter(0x101, Mock(vkCode=77))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows pynput dispatch ordering")
+    def test_suppression_happens_after_pynput_queues_its_own_callback(self):
+        # This exercises the installed pynput handler: suppressing in its filter
+        # would abort before _message_loop.post and silently break Ctrl+M.
+        listener = _SelectiveListener()
+        listener._message_loop = Mock()
+        events = []
+        listener._message_loop.post.side_effect = lambda *args: events.append("queued")
+        listener.suppress_event = lambda: events.append("suppressed")
+        listener.suppress_current_event = True
+        with patch.object(listener, "_convert", return_value=(0x100, 77)):
+            listener._handler(0, 0x100, None)
+        self.assertEqual(events, ["queued", "suppressed"])
 
 
 if __name__ == "__main__":

@@ -69,6 +69,19 @@ toggles recording; holding Control alone does not record. To use the console
 without a bubble, run `whisperer --no-overlay`. The bubble uses Python's built-in
 Tkinter; if Tkinter or a desktop display is unavailable, console dictation still works.
 
+On Windows, Ctrl+M is consumed by Whisperer so it doesn't trigger a second
+shortcut in the app you're dictating into. Automatic paste waits for you to
+release the recording shortcut and modifier keys. If a key stays held for more
+than three seconds, the transcript stays on the clipboard for a manual Ctrl+V.
+Pastes from overlapping recordings are serialized, and clipboard restoration
+leaves anything you copied during the paste alone.
+
+For slow recordings, look for the console's `timing` line after processing:
+`total=4.1s  transcription=3.2s  paste=0.9s`. Email/translation also shows a
+`rewrite` time. These times measure the wait after recording stops, excluding
+time spent speaking. Windows console QuickEdit is disabled while Whisperer runs
+to prevent accidental text selection from pausing output before the paste.
+
 ## Configuration
 
 Copy `whisperer.toml.example` to `whisperer.toml` in the directory you run from (the repo folder if you use `MyWhisper.cmd`), then edit and restart. Every setting is optional; missing keys keep the built-in defaults.

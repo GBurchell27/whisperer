@@ -14,6 +14,27 @@ _EVENT_WIDTH = 12
 _TEXT_PREFIX = "             | "
 
 
+def _disable_quick_edit() -> None:
+    """Avoid console text selection pausing logging before a transcript is pasted."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel32.GetStdHandle.restype = wintypes.HANDLE
+    kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.SetConsoleMode.restype = wintypes.BOOL
+    handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+    mode = wintypes.DWORD()
+    if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+        # ENABLE_EXTENDED_FLAGS is required when clearing ENABLE_QUICK_EDIT_MODE.
+        kernel32.SetConsoleMode(handle, (mode.value | 0x0080) & ~0x0040)
+
+
 class ConsoleLogger:
     """Writes aligned event lines to stdout; locks so background work cannot interleave."""
 
@@ -22,6 +43,8 @@ class ConsoleLogger:
         self._lock = threading.Lock()
         self._use_color = stream.isatty()
         self._configure_stream(stream)
+        if stream.isatty():
+            _disable_quick_edit()
 
     def _configure_stream(self, stream) -> None:
         reconfigure = getattr(stream, "reconfigure", None)

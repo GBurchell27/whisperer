@@ -7,6 +7,26 @@ from collections.abc import Callable, Mapping
 
 from pynput.keyboard import HotKey, Key, KeyCode, Listener
 
+_MODIFIER_VKS = {
+    0xA0: 0x10, 0xA1: 0x10, 0xA2: 0x11,
+    0xA3: 0x11, 0xA4: 0x12, 0xA5: 0x12, 0x5C: 0x5B,
+}
+
+
+class _SelectiveListener(Listener):
+    """Let pynput dispatch a hotkey before suppressing it in other apps.
+
+    Calling suppress_event() inside win32_event_filter raises before pynput
+    queues its own callback. The Windows listener checks this property after
+    queuing the callback, so the shortcut both works and stays out of the editor.
+    """
+
+    suppress_current_event = False
+
+    @property
+    def suppress(self) -> bool:
+        return self.suppress_current_event
+
 
 def parse_key(key_name: str) -> Key | KeyCode:
     """Turn a config string like 'ctrl_r' or 't' into a pynput key."""
@@ -79,6 +99,12 @@ class HotkeyListener:
         self._record_hotkey = HotKey(
             [self._normalize_key(key) for key in record_keys], self._toggle_recording
         )
+        self._record_vks = {
+            vk for key in record_keys
+            if (vk := virtual_key_code(self._normalize_key(key))) is not None
+        }
+        self._pressed_vks: set[int] = set()
+        self._shortcut_suppressed_vks: set[int] = set()
         self._on_record_start = on_record_start
         self._on_record_stop = on_record_stop
         self._recording_taps = dict(recording_taps or {})
@@ -106,7 +132,8 @@ class HotkeyListener:
         }
         if sys.platform == "win32":
             listener_kwargs["win32_event_filter"] = self._win32_event_filter
-        self._listener = Listener(**listener_kwargs)
+        listener_factory = _SelectiveListener if sys.platform == "win32" else Listener
+        self._listener = listener_factory(**listener_kwargs)
         self._listener.start()
         self._listener.wait()
 
@@ -165,7 +192,24 @@ class HotkeyListener:
         return key
 
     def _win32_event_filter(self, _msg, data) -> bool:
-        if self._recording and data.vkCode in self._suppressed_vks:
-            if self._listener is not None:
-                self._listener.suppress_event()
+        vk = data.vkCode
+        # Windows reports left/right modifier VKs; HotKey.parse uses generic VKs.
+        canonical_vk = _MODIFIER_VKS.get(vk, vk)
+        suppress_shortcut = vk in self._shortcut_suppressed_vks
+        if _msg in (0x0100, 0x0104):  # WM_KEYDOWN / WM_SYSKEYDOWN
+            self._pressed_vks.add(vk)
+            pressed = {
+                _MODIFIER_VKS.get(key, key)
+                for key in self._pressed_vks
+            }
+            if canonical_vk in self._record_vks and self._record_vks <= pressed:
+                self._shortcut_suppressed_vks.add(vk)
+                suppress_shortcut = True
+        elif _msg in (0x0101, 0x0105):  # WM_KEYUP / WM_SYSKEYUP
+            self._pressed_vks.discard(vk)
+            self._shortcut_suppressed_vks.discard(vk)
+        if self._listener is not None:
+            self._listener.suppress_current_event = suppress_shortcut or (
+                self._recording and vk in self._suppressed_vks
+            )
         return True
