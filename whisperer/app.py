@@ -16,6 +16,7 @@ from whisperer.config import CONFIG_FILE, WhispererConfig, resolve_openai_api_ke
 from whisperer.console_logger import ConsoleLogger
 from whisperer.hotkey_listener import HotkeyListener, parse_key
 from whisperer.output_manager import OutputManager
+from whisperer.status_bubble import DictationStatus, StatusBubble
 from whisperer.transcription.base import Transcriber
 from whisperer.translation_manager import TranslationManager
 
@@ -42,8 +43,9 @@ class WhispererApp:
         self._log = logger
         self._rewrite_mode: str | None = None
         self._keep_next_on_clipboard = False
+        self._status = DictationStatus()
 
-    def run(self) -> None:
+    def run(self, *, show_overlay: bool = True) -> None:
         listener = HotkeyListener(
             record_key=self._config.record_key,
             on_record_start=self._start_recording,
@@ -54,7 +56,33 @@ class WhispererApp:
             },
         )
         self._log_startup()
-        listener.run()
+        bubble = None
+        if show_overlay:
+            try:
+                bubble = StatusBubble(self._status, self._config.record_key)
+            except (ImportError, RuntimeError) as error:
+                self._log.warn("indicator", f"unavailable: {error}")
+            except Exception as error:
+                # Tk can be installed but unavailable (e.g. no desktop display).
+                self._log.warn("indicator", f"could not open: {error}")
+        try:
+            if bubble is None:
+                listener.run()
+            else:
+                listener.start()
+                bubble.run(listener.check)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            try:
+                listener.stop()
+            finally:
+                try:
+                    self._recorder.stop()
+                finally:
+                    self._status.set_recording(False)
+                    if bubble is not None:
+                        bubble.close()
 
     def _log_startup(self) -> None:
         backend = "local" if self._config.use_local_backend else "openai"
@@ -83,10 +111,12 @@ class WhispererApp:
         self._rewrite_mode = None
         self._log.blank()
         self._recorder.start()
+        self._status.set_recording(True)
         self._log.info("record", "started")
 
     def _stop_recording(self) -> None:
         audio = self._recorder.stop()
+        self._status.set_recording(False)
         duration_seconds = len(audio) / self._config.sample_rate
         if duration_seconds < self._config.tap_duration_seconds:
             self._keep_next_on_clipboard = True
@@ -114,7 +144,12 @@ class WhispererApp:
             args=(audio, rewrite_mode, keep_on_clipboard),
             daemon=True,
         )
-        worker.start()
+        self._status.processing_started()
+        try:
+            worker.start()
+        except Exception:
+            self._status.processing_finished(failed=True)
+            raise
 
     def _request_translation(self) -> None:
         self._rewrite_mode = "translate"
@@ -127,13 +162,17 @@ class WhispererApp:
     def _process_recording(
         self, audio: np.ndarray, rewrite_mode: str | None, keep_on_clipboard: bool
     ) -> None:
+        failed = False
         try:
             transcript = self._transcribe(audio)
             if rewrite_mode:
                 transcript = self._rewrite_or_warn(transcript, rewrite_mode)
             self._paste_or_skip(transcript, keep_on_clipboard)
         except Exception as error:  # keep the hotkey loop alive whatever goes wrong
+            failed = True
             self._log.error("failed", f"{type(error).__name__}: {error}")
+        finally:
+            self._status.processing_finished(failed=failed)
 
     def _transcribe(self, audio: np.ndarray) -> str:
         duration_seconds = len(audio) / self._config.sample_rate
@@ -177,6 +216,11 @@ def _parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="whisperer",
         description="Press Ctrl+M to start dictating; press again to transcribe and paste.",
+    )
+    parser.add_argument(
+        "--no-overlay",
+        action="store_true",
+        help="run without the floating microphone indicator",
     )
     parser.add_argument(
         "--local",
@@ -242,7 +286,7 @@ def main() -> None:
         output=OutputManager(),
         logger=logger,
     )
-    app.run()
+    app.run(show_overlay=not arguments.no_overlay)
 
 
 if __name__ == "__main__":

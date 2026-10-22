@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from pynput.keyboard import Key, KeyCode
 
@@ -128,6 +128,22 @@ class HotkeyListenerTests(unittest.TestCase):
                 for key in keys:
                     listener._on_press(key)
                 stop.assert_called_once_with()
+
+    def test_background_listener_starts_and_stops_cleanly(self):
+        with patch("whisperer.hotkey_listener.Listener") as listener:
+            self.listener.start()
+            listener.return_value.start.assert_called_once_with()
+            listener.return_value.wait.assert_called_once_with()
+            self.listener.stop()
+            listener.return_value.stop.assert_called_once_with()
+            listener.return_value.join.assert_called_once_with()
+
+    def test_listener_failure_is_reported_to_indicator_loop(self):
+        self.listener._listener = Mock()
+        self.listener._listener.is_alive.return_value = False
+        self.listener._listener.join.side_effect = RuntimeError("Callback failed")
+        with self.assertRaisesRegex(RuntimeError, "Callback failed"):
+            self.listener.check()
 
 
 if __name__ == "__main__":

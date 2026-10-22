@@ -92,6 +92,14 @@ class HotkeyListener:
 
     def run(self) -> None:
         """Block forever, dispatching hotkey events. Ctrl+C in the console exits."""
+        self.start()
+        try:
+            self._listener.join()
+        finally:
+            self.stop()
+
+    def start(self) -> None:
+        """Start hotkeys without blocking the main-thread indicator loop."""
         listener_kwargs: dict = {
             "on_press": self._on_press,
             "on_release": self._on_release,
@@ -99,7 +107,18 @@ class HotkeyListener:
         if sys.platform == "win32":
             listener_kwargs["win32_event_filter"] = self._win32_event_filter
         self._listener = Listener(**listener_kwargs)
-        with self._listener:
+        self._listener.start()
+        self._listener.wait()
+
+    def check(self) -> None:
+        """Surface callback failures to the UI instead of leaving a stale bubble."""
+        if self._listener is not None and not self._listener.is_alive():
+            self._listener.join()  # re-raises exceptions raised by a callback
+            raise RuntimeError("The global hotkey listener stopped.")
+
+    def stop(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
             self._listener.join()
 
     def _on_press(self, key: Key | KeyCode | None) -> None:

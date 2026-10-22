@@ -54,6 +54,21 @@ whisperer --local    # transcribe offline with faster-whisper
 - Recordings shorter than 1 second are discarded.
 - **Ctrl+C** in the console quits.
 
+A small always-on-top bubble appears above the taskbar at the bottom right when
+Whisperer starts, including when launched using Win+R → `MyWhisper`. Drag it to
+move it anywhere on your desktop. It stays out of the way of your typing focus.
+
+- **Mic off:** a quiet, crossed-out microphone; no audio is being captured.
+- **Listening:** a pink pulsing microphone while recording with Ctrl+M.
+- **Processing:** an amber spinning ring while transcribing, rewriting, and pasting;
+  the microphone is off unless you start another recording.
+- **Try again:** processing failed; see the console for details.
+
+The bubble's **×** button quits Whisperer and stops the microphone. Ctrl+M still
+toggles recording; holding Control alone does not record. To use the console
+without a bubble, run `whisperer --no-overlay`. The bubble uses Python's built-in
+Tkinter; if Tkinter or a desktop display is unavailable, console dictation still works.
+
 ## Configuration
 
 Copy `whisperer.toml.example` to `whisperer.toml` in the directory you run from (the repo folder if you use `MyWhisper.cmd`), then edit and restart. Every setting is optional; missing keys keep the built-in defaults.
