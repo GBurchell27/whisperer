@@ -22,13 +22,13 @@ class WhispererConfig:
     sample_rate: int = 16000
     min_duration_seconds: float = 1.0
     tap_duration_seconds: float = 0.5
+    restore_clipboard: bool = False
     transcription_model: str = "gpt-4o-mini-transcribe"
     translation_model: str = "gpt-5.6-luna"
     rewrite_reasoning_effort: str = "low"
     local_model_size: str = "small.en"
-    transcription_prompt: str = (
-        "How are you doing today? I'm really looking forward to seeing you again!"
-    )
+    transcription_prompt: str = ""
+    transcription_chunk_seconds: float = 30.0
     translation_system_prompt: str = (
         "You translate the input text to Quebec French using 'vous'. "
         "You only output the text and nothing else."

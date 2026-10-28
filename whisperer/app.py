@@ -222,9 +222,9 @@ class WhispererApp:
         if not transcript:
             self._log.warn("paste", "skipped (empty transcript)")
             return
-        self._output.paste(transcript, keep_on_clipboard=keep_on_clipboard)
-        clipboard = "kept on clipboard" if keep_on_clipboard else "clipboard restored"
-        self._log.info("paste", f"done  {clipboard}")
+        result = self._output.paste(transcript, keep_on_clipboard=keep_on_clipboard)
+        # Sending a shortcut doesn't prove the target app consumed the text.
+        self._log.info("paste", f"shortcut sent  {result}")
 
 
 def _parse_arguments() -> argparse.Namespace:
@@ -263,7 +263,11 @@ def _build_transcriber(
             "or openai_api_key.txt in the directory you run whisperer from.",
         )
         sys.exit(1)
-    return OpenAITranscriber(client, config.transcription_model, config.transcription_prompt)
+    return OpenAITranscriber(
+        client, config.transcription_model, config.transcription_prompt,
+        chunk_seconds=config.transcription_chunk_seconds,
+        on_progress=lambda detail: logger.info("transcribe", detail),
+    )
 
 
 def main() -> None:
@@ -298,7 +302,7 @@ def main() -> None:
         ),
         transcriber=_build_transcriber(config, client, logger),
         translator=translator,
-        output=OutputManager(config.record_key),
+        output=OutputManager(config.record_key, restore_clipboard=config.restore_clipboard),
         logger=logger,
     )
     app.run(show_overlay=not arguments.no_overlay)

@@ -15,6 +15,28 @@ class OutputManagerTests(unittest.TestCase):
         self.addCleanup(keyboard_patch.stop)
         self.output = OutputManager()
         self.output._get_key_state = None
+        self.output._windows_paste = None
+        self.output._restore_clipboard = True
+
+    def test_default_keeps_transcript_available_for_manual_paste(self):
+        output = OutputManager()
+        output._get_key_state = None
+        output._windows_paste = Mock()
+        with patch("whisperer.output_manager.pyperclip.copy") as copy, patch(
+            "whisperer.output_manager.time.sleep"
+        ):
+            result = output.paste("recoverable transcript")
+        copy.assert_called_once_with("recoverable transcript")
+        self.assertEqual(result, "transcript kept on clipboard")
+
+    def test_windows_input_failure_keeps_transcript_and_does_not_report_success(self):
+        self.output._windows_paste = Mock(side_effect=RuntimeError("Windows accepted 0/4"))
+        with patch("whisperer.output_manager.pyperclip.copy") as copy, patch(
+            "whisperer.output_manager.pyperclip.paste", return_value="previous"
+        ), patch("whisperer.output_manager.time.sleep"):
+            with self.assertRaisesRegex(RuntimeError, "0/4"):
+                self.output.paste("recoverable transcript")
+        copy.assert_called_once_with("recoverable transcript")
 
     def test_paste_waits_for_shortcut_release_before_sending_keys(self):
         events = []
@@ -33,6 +55,13 @@ class OutputManagerTests(unittest.TestCase):
             self.output._wait_for_key_release()
         sleep.assert_called_once_with(0.02)
 
+    def test_automatic_paste_waits_for_a_manual_v_press_to_finish(self):
+        held = {0x56}
+        self.output._get_key_state = lambda vk: 0x8000 if vk in held else 0
+        with patch("whisperer.output_manager.time.sleep", side_effect=lambda _: held.clear()) as sleep:
+            self.output._wait_for_key_release()
+        sleep.assert_called_once_with(0.02)
+
     def test_stuck_modifier_keeps_transcript_for_manual_paste(self):
         self.output._get_key_state = lambda _: 0x8000
         with patch("whisperer.output_manager.time.monotonic", side_effect=[0, 4]), patch(
@@ -44,6 +73,12 @@ class OutputManagerTests(unittest.TestCase):
                 self.output.paste("hello")
         copy.assert_called_once_with("hello")
         self.keyboard.press.assert_not_called()
+
+    def test_timeout_names_the_specific_keys_windows_reports_as_held(self):
+        self.output._get_key_state = lambda vk: 0x8000 if vk in {0x10, 77} else 0
+        with patch("whisperer.output_manager.time.monotonic", side_effect=[0, 4]):
+            with self.assertRaisesRegex(RuntimeError, "keys held: Shift, m.*tap and release"):
+                self.output._wait_for_key_release()
 
     def test_restores_clipboard_after_target_has_time_to_read_it(self):
         with patch("whisperer.output_manager.pyperclip.copy") as copy, patch(

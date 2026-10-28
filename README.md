@@ -49,7 +49,7 @@ whisperer --local    # transcribe offline with faster-whisper
 - **Press Ctrl+M** to start recording; **press Ctrl+M again** to stop, transcribe, and paste at your cursor. Either Ctrl key works; releasing the keys leaves recording on.
 - **Tap right Shift while recording** to translate the transcript (Quebec French by default).
 - **Tap E while recording** to rewrite the transcript as a succinct email.
-- **Quickly toggle recording on and off** (under 0.5 seconds) before recording to keep the next transcript on the clipboard after pasting (normally your previous clipboard contents are restored).
+- Transcripts stay on the clipboard after pasting, so **Ctrl+V** can recover a failed paste. Set `restore_clipboard = true` to restore your previous clipboard instead. With restoration enabled, **quickly toggle recording on and off** (under 0.5 seconds) to keep the next transcript.
 - Say **"New paragraph."** to insert a blank line.
 - Recordings shorter than 1 second are discarded.
 - **Ctrl+C** in the console quits.
@@ -70,17 +70,40 @@ without a bubble, run `whisperer --no-overlay`. The bubble uses Python's built-i
 Tkinter; if Tkinter or a desktop display is unavailable, console dictation still works.
 
 On Windows, Ctrl+M is consumed by Whisperer so it doesn't trigger a second
-shortcut in the app you're dictating into. Automatic paste waits for you to
-release the recording shortcut and modifier keys. If a key stays held for more
+shortcut in the app you're dictating into. Simulated input, including Whisperer's
+own Ctrl+V, cannot trigger recording. Microphone operations and logging run on a
+separate action thread so a slow audio device or console cannot freeze global
+keyboard input. Actions run in order; quitting removes the keyboard hook before
+waiting for microphone work to finish. A failed action stops the hook and reports
+the original error. Ctrl remains available for other shortcuts even if you press
+M before Ctrl while toggling recording.
+
+Automatic paste waits for you to release the recording shortcut, V, and modifier
+keys. If a key stays held for more
 than three seconds, the transcript stays on the clipboard for a manual Ctrl+V.
-Pastes from overlapping recordings are serialized, and clipboard restoration
+The error names the keys Windows still reports as held. If you've already
+released them, tap and release those keys again to clear a stuck state.
+Key releases follow the same suppression decision as their initial press, so
+holding right Shift across a recording toggle cannot swallow only its release.
+Pastes from overlapping recordings are serialized. Windows paste key events are
+sent as one checked batch; rejected input is logged as an error with the transcript
+still on the clipboard. The log says `shortcut sent` because the app cannot verify
+that another application actually inserted the text. Optional clipboard restoration
 leaves anything you copied during the paste alone.
 
 For slow recordings, look for the console's `timing` line after processing:
-`total=4.1s  transcription=3.2s  paste=0.9s`. Email/translation also shows a
+`total=3.3s  transcription=3.2s  paste=0.1s`. Email/translation also shows a
 `rewrite` time. These times measure the wait after recording stops, excluding
 time spent speaking. Windows console QuickEdit is disabled while Whisperer runs
 to prevent accidental text selection from pausing output before the paste.
+
+For longer recordings, hosted transcription looks for quiet pauses near each
+30-second mark and sends up to two chunks at a time, joining the complete result
+in speech order. Chunk timing lines show the request time for each part. Continuous
+speech is kept intact if no suitable pause exists; short recordings use one request.
+Set `transcription_chunk_seconds = 0` to disable splitting. The transcription prompt
+defaults to empty, and digital silence is skipped to avoid inventing text from an
+example greeting. You can supply a prompt containing names or vocabulary you use.
 
 ## Configuration
 
@@ -93,12 +116,14 @@ email_key = "e"
 sample_rate = 16000
 min_duration_seconds = 1.0
 tap_duration_seconds = 0.5
+restore_clipboard = false
 transcription_model = "gpt-4o-mini-transcribe"
 translation_model = "gpt-5.6-luna"
 rewrite_reasoning_effort = "low"
 local_model_size = "small.en"
 use_local_backend = false
-transcription_prompt = "How are you doing today? I'm really looking forward to seeing you again!"
+transcription_prompt = ""
+transcription_chunk_seconds = 30.0
 translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
 email_system_prompt = "Turn the spoken transcript into a succinct email. Output only a one-line subject prefixed with 'Subject: ', a blank line, and a short body of at most a few sentences. Do not add a greeting, sign-off, or commentary unless the speaker included one. Preserve the speaker's intent, names, facts, and requests. Be concise."
 ```

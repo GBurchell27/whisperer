@@ -10,12 +10,17 @@ email_key = "e"
 sample_rate = 16000
 min_duration_seconds = 1.0
 tap_duration_seconds = 0.5
+# Keep the transcript available for manual Ctrl+V if the target app misses a paste.
+restore_clipboard = false
 
 # --- Models ---
 # Transcription: OpenAI audio model, or a faster-whisper size when use_local_backend is true.
 transcription_model = "gpt-4o-mini-transcribe"
 local_model_size = "small.en"
 use_local_backend = false
+# Split longer recordings at quiet pauses; at most two hosted requests in parallel.
+# Set to 0 to send the entire recording in one request.
+transcription_chunk_seconds = 30.0
 
 # Rewrite (translate + email). Official GPT-5.6 cost tier: gpt-5.6-luna
 # Alternatives: gpt-5.6-terra (balanced), gpt-5.6-sol (flagship), gpt-4o-mini
@@ -26,7 +31,8 @@ translation_model = "gpt-5.6-luna"
 rewrite_reasoning_effort = "low"
 
 # --- Prompts ---
-transcription_prompt = "How are you doing today? I'm really looking forward to seeing you again!"
+# Optional names/vocabulary. Leave blank to avoid priming invented text on silence.
+transcription_prompt = ""
 
 translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
 
