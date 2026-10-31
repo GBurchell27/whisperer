@@ -10,6 +10,13 @@ from pathlib import Path
 CONFIG_FILE = Path("whisperer.toml")
 API_KEY_FILE = Path("openai_api_key.txt")
 ENV_FILE = Path(".env")
+# Accept older config files without restoring the removed translation feature.
+_REMOVED_TRANSLATION_SETTINGS = {
+    "translate_key",
+    "translation_model",
+    "rewrite_reasoning_effort",
+    "translation_system_prompt",
+}
 
 
 @dataclass(frozen=True)
@@ -17,21 +24,14 @@ class WhispererConfig:
     """All tunable settings; every field can be overridden in whisperer.toml."""
 
     record_key: str = "<ctrl>+m"
-    translate_key: str = "shift_r"
     sample_rate: int = 16000
     min_duration_seconds: float = 1.0
     tap_duration_seconds: float = 0.5
     restore_clipboard: bool = False
     transcription_model: str = "gpt-4o-mini-transcribe"
-    translation_model: str = "gpt-5.6-luna"
-    rewrite_reasoning_effort: str = "low"
     local_model_size: str = "small.en"
     transcription_prompt: str = ""
     transcription_chunk_seconds: float = 30.0
-    translation_system_prompt: str = (
-        "You translate the input text to Quebec French using 'vous'. "
-        "You only output the text and nothing else."
-    )
     use_local_backend: bool = False
 
     @classmethod
@@ -40,6 +40,10 @@ class WhispererConfig:
             return cls()
         with config_path.open("rb") as config_file:
             overrides = tomllib.load(config_file)
+        overrides = {
+            name: value for name, value in overrides.items()
+            if name not in _REMOVED_TRANSLATION_SETTINGS
+        }
         valid_names = {field.name for field in fields(cls)}
         unknown_names = set(overrides) - valid_names
         if unknown_names:

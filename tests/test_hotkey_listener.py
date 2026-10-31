@@ -14,12 +14,12 @@ class HotkeyListenerTests(unittest.TestCase):
     def setUp(self):
         self.start = Mock()
         self.stop = Mock()
-        self.translate = Mock()
+        self.tap_action = Mock()
         self.listener = HotkeyListener(
             record_key="<ctrl>+m",
             on_record_start=self.start,
             on_record_stop=self.stop,
-            recording_taps={Key.shift_r: self.translate},
+            recording_taps={Key.shift_r: self.tap_action},
         )
         self.m = KeyCode.from_char("m")
 
@@ -85,17 +85,17 @@ class HotkeyListenerTests(unittest.TestCase):
         self.start.assert_called_once_with()
         self.stop.assert_called_once_with()
 
-    def test_translation_is_available_after_releasing_shortcut(self):
+    def test_recording_taps_only_run_while_recording(self):
         self.listener._on_press(Key.shift_r)
-        self.translate.assert_not_called()
+        self.tap_action.assert_not_called()
         self.press_shortcut()
         self.release_shortcut()
         self.listener._on_press(Key.shift_r)
-        self.translate.assert_called_once_with()
+        self.tap_action.assert_called_once_with()
         self.press_shortcut()
         self.release_shortcut()
         self.listener._on_press(Key.shift_r)
-        self.translate.assert_called_once_with()
+        self.tap_action.assert_called_once_with()
 
     def test_unknown_events_are_ignored(self):
         self.listener._on_press(None)
@@ -161,7 +161,7 @@ class HotkeyListenerTests(unittest.TestCase):
                     record_key=shortcut,
                     on_record_start=start,
                     on_record_stop=stop,
-                    recording_taps={Key.shift_r: self.translate},
+                    recording_taps={Key.shift_r: self.tap_action},
                 )
                 for key in keys:
                     listener._on_press(key)
@@ -333,7 +333,7 @@ class HotkeyListenerTests(unittest.TestCase):
 
         self.listener._on_record_start = slow_start
         self.listener._on_record_stop = stop
-        self.listener._recording_taps[Key.shift_r] = lambda: actions.append("translate")
+        self.listener._recording_taps[Key.shift_r] = lambda: actions.append("tap")
         driver = threading.Thread(
             target=lambda: (self.press_shortcut(), self.release_shortcut(), dispatched.set()),
             daemon=True,
@@ -354,7 +354,7 @@ class HotkeyListenerTests(unittest.TestCase):
                 self.assertEqual(actions, ["start"])
                 finish_start.set()
                 self.assertTrue(stopped.wait(1))
-                self.assertEqual(actions, ["start", "translate", "stop"])
+                self.assertEqual(actions, ["start", "tap", "stop"])
             finally:
                 finish_start.set()
                 driver.join(2)

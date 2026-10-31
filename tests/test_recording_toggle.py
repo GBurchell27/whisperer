@@ -12,59 +12,40 @@ from whisperer.hotkey_listener import HotkeyListener
 
 class RecordingToggleTests(unittest.TestCase):
     def test_second_press_stops_microphone_and_processes_recording(self):
-        for mode in (None, "translate"):
-            with self.subTest(mode=mode):
-                config = WhispererConfig()
-                recorder = Mock()
-                audio = np.zeros(config.sample_rate, dtype=np.float32)
-                recorder.stop.return_value = audio
-                transcriber = Mock()
-                transcriber.transcribe.return_value = "Hello."
-                translator = Mock()
-                translator.rewrite.return_value = "Rewritten."
-                output = Mock()
-                app = WhispererApp(config, recorder, transcriber, translator, output, Mock())
-                listener = HotkeyListener(
-                    record_key=config.record_key,
-                    on_record_start=app._start_recording,
-                    on_record_stop=app._stop_recording,
-                    recording_taps={
-                        Key.shift_r: app._request_translation,
-                    },
-                )
+        config = WhispererConfig()
+        recorder = Mock()
+        audio = np.zeros(config.sample_rate, dtype=np.float32)
+        recorder.stop.return_value = audio
+        transcriber = Mock()
+        transcriber.transcribe.return_value = "Hello."
+        output = Mock()
+        app = WhispererApp(config, recorder, transcriber, output, Mock())
+        listener = HotkeyListener(
+            record_key=config.record_key,
+            on_record_start=app._start_recording,
+            on_record_stop=app._stop_recording,
+        )
 
-                with patch("whisperer.app.threading.Thread") as worker:
-                    listener._on_press(Key.ctrl_l)
-                    listener._on_press(KeyCode.from_char("m"))
-                    listener._on_release(KeyCode.from_char("m"))
-                    listener._on_release(Key.ctrl_l)
-                    recorder.start.assert_called_once_with()
-                    recorder.stop.assert_not_called()
-                    worker.assert_not_called()
+        with patch("whisperer.app.threading.Thread") as worker:
+            listener._on_press(Key.ctrl_l)
+            listener._on_press(KeyCode.from_char("m"))
+            listener._on_release(KeyCode.from_char("m"))
+            listener._on_release(Key.ctrl_l)
+            recorder.start.assert_called_once_with()
+            recorder.stop.assert_not_called()
+            worker.assert_not_called()
 
-                    if mode:
-                        listener._on_press(Key.shift_r)
-                        listener._on_release(Key.shift_r)
+            listener._on_press(Key.ctrl_l)
+            listener._on_press(KeyCode.from_char("m"))
+            recorder.stop.assert_called_once_with()
+            worker.return_value.start.assert_called_once_with()
+            args = worker.call_args.kwargs["args"]
+            self.assertIs(args[0], audio)
+            self.assertEqual(args[1:], (False,))
+            worker.call_args.kwargs["target"](*args)
 
-                    listener._on_press(Key.ctrl_l)
-                    listener._on_press(KeyCode.from_char("m"))
-                    recorder.stop.assert_called_once_with()
-                    worker.return_value.start.assert_called_once_with()
-                    args = worker.call_args.kwargs["args"]
-                    self.assertIs(args[0], audio)
-                    self.assertEqual(args[1:], (mode, False))
-                    worker.call_args.kwargs["target"](*args)
-
-                transcriber.transcribe.assert_called_once_with(audio, config.sample_rate)
-                if mode:
-                    translator.rewrite.assert_called_once_with(
-                        "Hello.", config.translation_system_prompt
-                    )
-                else:
-                    translator.rewrite.assert_not_called()
-                output.paste.assert_called_once_with(
-                    "Rewritten." if mode else "Hello.", keep_on_clipboard=False
-                )
+        transcriber.transcribe.assert_called_once_with(audio, config.sample_rate)
+        output.paste.assert_called_once_with("Hello.", keep_on_clipboard=False)
 
     def test_typing_e_while_recording_passes_through_and_keeps_verbatim_output(self):
         config = WhispererConfig()
@@ -73,9 +54,8 @@ class RecordingToggleTests(unittest.TestCase):
         recorder.stop.return_value = audio
         transcriber = Mock()
         transcriber.transcribe.return_value = "Hello."
-        translator = Mock()
         output = Mock()
-        app = WhispererApp(config, recorder, transcriber, translator, output, Mock())
+        app = WhispererApp(config, recorder, transcriber, output, Mock())
 
         def record_while_typing(listener):
             # Use the listener wired by app.run(), without installing a global hook.
@@ -93,7 +73,7 @@ class RecordingToggleTests(unittest.TestCase):
             listener._on_press(Key.ctrl_l)
             listener._on_press(KeyCode.from_char("m"))
             args = worker.call_args.kwargs["args"]
-            self.assertEqual(args[1:], (None, False))
+            self.assertEqual(args[1:], (False,))
             worker.call_args.kwargs["target"](*args)
 
         with patch(
@@ -102,8 +82,59 @@ class RecordingToggleTests(unittest.TestCase):
             app.run(show_overlay=False)
 
         transcriber.transcribe.assert_called_once_with(audio, config.sample_rate)
-        translator.rewrite.assert_not_called()
         output.paste.assert_called_once_with("Hello.", keep_on_clipboard=False)
+
+    def test_right_shift_passes_through_and_cannot_change_dictation_language(self):
+        for transcript in ("Hello, this stays in English.", "Dit blijft Nederlands."):
+            with self.subTest(transcript=transcript):
+                config = WhispererConfig()
+                recorder = Mock()
+                audio = np.zeros(config.sample_rate * 120, dtype=np.float32)
+                recorder.stop.return_value = audio
+                transcriber = Mock()
+                transcriber.transcribe.return_value = transcript
+                output = Mock()
+                app = WhispererApp(config, recorder, transcriber, output, Mock())
+
+                def record_with_shift(listener):
+                    # Exercise app.run()'s actual bindings without a global hook.
+                    listener._listener = Mock()
+
+                    def shift(msg):
+                        listener._win32_event_filter(
+                            msg, SimpleNamespace(vkCode=Key.shift_r.value.vk, flags=0)
+                        )
+                        self.assertFalse(listener._listener.suppress_current_event)
+                        callback = listener._on_release if msg == 0x101 else listener._on_press
+                        callback(Key.shift_r)
+
+                    def toggle():
+                        listener._on_press(Key.ctrl_l)
+                        listener._on_press(KeyCode.from_char("m"))
+                        listener._on_release(KeyCode.from_char("m"))
+                        listener._on_release(Key.ctrl_l)
+
+                    shift(0x100)
+                    shift(0x101)
+                    toggle()
+                    recorder.start.assert_called_once_with()
+                    for _ in range(3):
+                        shift(0x100)
+                        shift(0x100)  # auto-repeat
+                        shift(0x101)
+                    shift(0x100)  # Keep Shift held across the stop toggle.
+                    toggle()
+                    shift(0x101)
+                    recorder.stop.assert_called_once_with()
+                    worker.call_args.kwargs["target"](*worker.call_args.kwargs["args"])
+
+                with patch(
+                    "whisperer.app.HotkeyListener.run", autospec=True, side_effect=record_with_shift
+                ), patch("whisperer.app.threading.Thread") as worker:
+                    app.run(show_overlay=False)
+
+                transcriber.transcribe.assert_called_once_with(audio, config.sample_rate)
+                output.paste.assert_called_once_with(transcript, keep_on_clipboard=False)
 
 
 if __name__ == "__main__":

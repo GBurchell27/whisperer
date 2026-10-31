@@ -14,34 +14,30 @@ from openai import OpenAI
 from whisperer.audio_recorder import AudioRecorder
 from whisperer.config import CONFIG_FILE, WhispererConfig, resolve_openai_api_key
 from whisperer.console_logger import ConsoleLogger
-from whisperer.hotkey_listener import HotkeyListener, parse_key
+from whisperer.hotkey_listener import HotkeyListener
 from whisperer.output_manager import OutputManager
 from whisperer.status_bubble import DictationStatus, StatusBubble
 from whisperer.transcription.base import Transcriber
-from whisperer.translation_manager import TranslationManager
 
 NEW_PARAGRAPH_COMMAND = "New paragraph."
 
 
 class WhispererApp:
-    """Coordinates the record → transcribe → (rewrite) → paste pipeline."""
+    """Coordinates the record → transcribe → paste pipeline."""
 
     def __init__(
         self,
         config: WhispererConfig,
         recorder: AudioRecorder,
         transcriber: Transcriber,
-        translator: TranslationManager | None,
         output: OutputManager,
         logger: ConsoleLogger,
     ) -> None:
         self._config = config
         self._recorder = recorder
         self._transcriber = transcriber
-        self._translator = translator
         self._output = output
         self._log = logger
-        self._rewrite_mode: str | None = None
         self._keep_next_on_clipboard = False
         self._status = DictationStatus()
 
@@ -50,9 +46,6 @@ class WhispererApp:
             record_key=self._config.record_key,
             on_record_start=self._start_recording,
             on_record_stop=self._stop_recording,
-            recording_taps={
-                parse_key(self._config.translate_key): self._request_translation,
-            },
         )
         self._log_startup()
         bubble = None
@@ -92,21 +85,11 @@ class WhispererApp:
         )
         self._log.info(
             "ready",
-            f"press {self._config.record_key} to start/stop recording | "
-            f"tap {self._config.translate_key} to translate | Ctrl+C quits",
+            f"press {self._config.record_key} to start/stop recording | Ctrl+C quits",
         )
         self._log.info("backend", f"{backend}  transcribe={transcribe_model}")
-        if self._translator is None:
-            self._log.warn("rewrite", "unavailable (no OpenAI API key)")
-        else:
-            effort = self._config.rewrite_reasoning_effort or "model default"
-            self._log.info(
-                "rewrite",
-                f"model={self._config.translation_model}  effort={effort}",
-            )
 
     def _start_recording(self) -> None:
-        self._rewrite_mode = None
         self._log.blank()
         self._recorder.start()
         self._status.set_recording(True)
@@ -132,14 +115,12 @@ class WhispererApp:
         self._queue_processing(audio, duration_seconds)
 
     def _queue_processing(self, audio: np.ndarray, duration_seconds: float) -> None:
-        rewrite_mode = self._rewrite_mode
         keep_on_clipboard = self._keep_next_on_clipboard
         self._keep_next_on_clipboard = False
-        mode = rewrite_mode or "verbatim"
-        self._log.info("record", f"stopped  {duration_seconds:.1f}s  -> {mode}")
+        self._log.info("record", f"stopped  {duration_seconds:.1f}s  -> verbatim")
         worker = threading.Thread(
             target=self._process_recording,
-            args=(audio, rewrite_mode, keep_on_clipboard),
+            args=(audio, keep_on_clipboard),
             daemon=True,
         )
         self._status.processing_started()
@@ -149,12 +130,8 @@ class WhispererApp:
             self._status.processing_finished(failed=True)
             raise
 
-    def _request_translation(self) -> None:
-        self._rewrite_mode = "translate"
-        self._log.info("mode", "translate")
-
     def _process_recording(
-        self, audio: np.ndarray, rewrite_mode: str | None, keep_on_clipboard: bool
+        self, audio: np.ndarray, keep_on_clipboard: bool
     ) -> None:
         failed = False
         started = time.perf_counter()
@@ -164,11 +141,6 @@ class WhispererApp:
         try:
             transcript = self._transcribe(audio)
             timings[stage] = time.perf_counter() - stage_started
-            if rewrite_mode:
-                stage = "rewrite"
-                stage_started = time.perf_counter()
-                transcript = self._rewrite_or_warn(transcript, rewrite_mode)
-                timings[stage] = time.perf_counter() - stage_started
             stage = "paste"
             stage_started = time.perf_counter()
             self._paste_or_skip(transcript, keep_on_clipboard)
@@ -193,18 +165,6 @@ class WhispererApp:
         self._log.info("transcript", f"{elapsed:.1f}s  {len(transcript)} chars")
         self._log.text(transcript)
         return transcript
-
-    def _rewrite_or_warn(self, transcript: str, mode: str) -> str:
-        if self._translator is None:
-            self._log.warn("rewrite", f"{mode} skipped (no OpenAI API key)")
-            return transcript
-        self._log.info("rewrite", f"{mode}  sending to {self._config.translation_model}")
-        started = time.perf_counter()
-        rewritten = self._translator.rewrite(transcript, self._config.translation_system_prompt)
-        elapsed = time.perf_counter() - started
-        self._log.info("rewritten", f"{mode}  {elapsed:.1f}s  {len(rewritten)} chars")
-        self._log.text(rewritten)
-        return rewritten
 
     def _paste_or_skip(self, transcript: str, keep_on_clipboard: bool) -> None:
         if not transcript:
@@ -271,16 +231,6 @@ def main() -> None:
 
     api_key = resolve_openai_api_key()
     client = OpenAI(api_key=api_key) if api_key else None
-    translator = (
-        TranslationManager(
-            client,
-            config.translation_model,
-            config.translation_system_prompt,
-            reasoning_effort=config.rewrite_reasoning_effort,
-        )
-        if client
-        else None
-    )
 
     app = WhispererApp(
         config=config,
@@ -289,7 +239,6 @@ def main() -> None:
             on_status=lambda status: logger.warn("audio", status),
         ),
         transcriber=_build_transcriber(config, client, logger),
-        translator=translator,
         output=OutputManager(config.record_key, restore_clipboard=config.restore_clipboard),
         logger=logger,
     )

@@ -1,9 +1,8 @@
 # Whisperer local settings. Copy this file to whisperer.toml and restart the app.
 # whisperer.toml is gitignored so your personal values stay local.
 
-# --- Hotkeys (recording shortcut: <ctrl>+m; translation tap: shift_r) ---
+# --- Recording shortcut ---
 record_key = "<ctrl>+m"
-translate_key = "shift_r"
 
 # --- Recording ---
 sample_rate = 16000
@@ -21,16 +20,6 @@ use_local_backend = false
 # Set to 0 to send the entire recording in one request.
 transcription_chunk_seconds = 30.0
 
-# Translation. Official GPT-5.6 cost tier: gpt-5.6-luna
-# Alternatives: gpt-5.6-terra (balanced), gpt-5.6-sol (flagship), gpt-4o-mini
-translation_model = "gpt-5.6-luna"
-
-# Reasoning effort for GPT-5.6: none, low, medium, high, xhigh, max
-# low keeps translation fast; set "" to omit the parameter (needed for gpt-4o-mini).
-rewrite_reasoning_effort = "low"
-
 # --- Prompts ---
 # Optional names/vocabulary. Leave blank to avoid priming invented text on silence.
 transcription_prompt = ""
-
-translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."

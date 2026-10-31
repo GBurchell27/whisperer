@@ -51,7 +51,7 @@ class AppIndicatorTests(unittest.TestCase):
         self.transcriber = Mock()
         self.transcriber.transcribe.return_value = "Hello."
         self.app = WhispererApp(
-            self.config, self.recorder, self.transcriber, None, Mock(), Mock()
+            self.config, self.recorder, self.transcriber, Mock(), Mock()
         )
 
     def test_recording_processing_and_finished_states(self):
@@ -83,7 +83,7 @@ class AppIndicatorTests(unittest.TestCase):
     def test_transcription_error_does_not_leave_processing_animation_running(self):
         self.transcriber.transcribe.side_effect = RuntimeError("Offline")
         self.app._status.processing_started()
-        self.app._process_recording(np.zeros(self.config.sample_rate), None, False)
+        self.app._process_recording(np.zeros(self.config.sample_rate), False)
         self.assertEqual(self.app._status.state, "error")
 
     def test_closing_overlay_stops_hotkeys_and_microphone(self):

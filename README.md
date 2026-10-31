@@ -5,7 +5,7 @@ Toggle dictation for your desktop. Press **Ctrl+M** to turn the microphone on, s
 ## Requirements
 
 - Python 3.11+
-- An OpenAI API key (not needed if you only use the local backend without translation)
+- An OpenAI API key (not needed if you only use the local backend)
 
 ## Install
 
@@ -47,7 +47,7 @@ whisperer --local    # transcribe offline with faster-whisper
 (Equivalently: `python -m whisperer`.)
 
 - **Press Ctrl+M** to start recording; **press Ctrl+M again** to stop, transcribe, and paste at your cursor. Either Ctrl key works; releasing the keys leaves recording on.
-- **Tap right Shift while recording** to translate the transcript (Quebec French by default).
+- Dictation keeps the spoken language. Right Shift works normally while recording.
 - Transcripts stay on the clipboard after pasting, so **Ctrl+V** can recover a failed paste. Set `restore_clipboard = true` to restore your previous clipboard instead. With restoration enabled, **quickly toggle recording on and off** (under 0.5 seconds) to keep the next transcript.
 - Say **"New paragraph."** to insert a blank line.
 - Recordings shorter than 1 second are discarded.
@@ -59,7 +59,7 @@ move it anywhere on your desktop. It stays out of the way of your typing focus.
 
 - **Mic off:** a quiet, crossed-out microphone; no audio is being captured.
 - **Listening:** a pink pulsing microphone while recording with Ctrl+M.
-- **Processing:** an amber spinning ring while transcribing, rewriting, and pasting;
+- **Processing:** an amber spinning ring while transcribing and pasting;
   the microphone is off unless you start another recording.
 - **Try again:** processing failed; see the console for details.
 
@@ -91,9 +91,8 @@ that another application actually inserted the text. Optional clipboard restorat
 leaves anything you copied during the paste alone.
 
 For slow recordings, look for the console's `timing` line after processing:
-`total=3.3s  transcription=3.2s  paste=0.1s`. Translation also shows a
-`rewrite` time. These times measure the wait after recording stops, excluding
-time spent speaking. Windows console QuickEdit is disabled while Whisperer runs
+`total=3.3s  transcription=3.2s  paste=0.1s`. These times measure the wait after
+recording stops, excluding time spent speaking. Windows console QuickEdit is disabled while Whisperer runs
 to prevent accidental text selection from pausing output before the paste.
 
 For longer recordings, hosted transcription looks for quiet pauses near each
@@ -110,26 +109,22 @@ Copy `whisperer.toml.example` to `whisperer.toml` in the directory you run from 
 
 ```toml
 record_key = "<ctrl>+m"
-translate_key = "shift_r"
 sample_rate = 16000
 min_duration_seconds = 1.0
 tap_duration_seconds = 0.5
 restore_clipboard = false
 transcription_model = "gpt-4o-mini-transcribe"
-translation_model = "gpt-5.6-luna"
-rewrite_reasoning_effort = "low"
 local_model_size = "small.en"
 use_local_backend = false
 transcription_prompt = ""
 transcription_chunk_seconds = 30.0
-translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
 ```
 
-The recording shortcut uses pynput hotkey syntax (`<ctrl>+m`, `<alt>+r`, …), a single pynput key name (`ctrl_r`, `f13`, …), or a single character. Recording always toggles on each press. The translation key is a pynput key name or a single character.
+The recording shortcut uses pynput hotkey syntax (`<ctrl>+m`, `<alt>+r`, …), a single pynput key name (`ctrl_r`, `f13`, …), or a single character. Recording always toggles on each press.
+
+Translation has been removed. Older translation settings in `whisperer.toml` are ignored.
 
 After changing the code or settings, close any running Whisperer console and launch `MyWhisper` again from Win+R.
-
-Translation uses OpenAI [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) (`gpt-5.6-luna`) by default — the cost-optimized GPT-5.6 tier. `rewrite_reasoning_effort` can be `none`, `low`, `medium`, `high`, `xhigh`, or `max`. Use `low` for fast translation; set it to `""` if you switch `translation_model` back to a non-reasoning model such as `gpt-4o-mini`.
 
 ## Notes
 
