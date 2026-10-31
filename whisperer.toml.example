@@ -1,10 +1,9 @@
 # Whisperer local settings. Copy this file to whisperer.toml and restart the app.
 # whisperer.toml is gitignored so your personal values stay local.
 
-# --- Hotkeys (recording shortcut: <ctrl>+m; tap keys: shift_r, e, etc.) ---
+# --- Hotkeys (recording shortcut: <ctrl>+m; translation tap: shift_r) ---
 record_key = "<ctrl>+m"
 translate_key = "shift_r"
-email_key = "e"
 
 # --- Recording ---
 sample_rate = 16000
@@ -22,12 +21,12 @@ use_local_backend = false
 # Set to 0 to send the entire recording in one request.
 transcription_chunk_seconds = 30.0
 
-# Rewrite (translate + email). Official GPT-5.6 cost tier: gpt-5.6-luna
+# Translation. Official GPT-5.6 cost tier: gpt-5.6-luna
 # Alternatives: gpt-5.6-terra (balanced), gpt-5.6-sol (flagship), gpt-4o-mini
 translation_model = "gpt-5.6-luna"
 
 # Reasoning effort for GPT-5.6: none, low, medium, high, xhigh, max
-# low keeps email/translate fast; set "" to omit the parameter (needed for gpt-4o-mini).
+# low keeps translation fast; set "" to omit the parameter (needed for gpt-4o-mini).
 rewrite_reasoning_effort = "low"
 
 # --- Prompts ---
@@ -35,5 +34,3 @@ rewrite_reasoning_effort = "low"
 transcription_prompt = ""
 
 translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
-
-email_system_prompt = "Turn the spoken transcript into a succinct email. Output only a one-line subject prefixed with 'Subject: ', a blank line, and a short body of at most a few sentences. Do not add a greeting, sign-off, or commentary unless the speaker included one. Preserve the speaker's intent, names, facts, and requests. Be concise."

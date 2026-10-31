@@ -52,7 +52,6 @@ class WhispererApp:
             on_record_stop=self._stop_recording,
             recording_taps={
                 parse_key(self._config.translate_key): self._request_translation,
-                parse_key(self._config.email_key): self._request_email,
             },
         )
         self._log_startup()
@@ -94,8 +93,7 @@ class WhispererApp:
         self._log.info(
             "ready",
             f"press {self._config.record_key} to start/stop recording | "
-            f"tap {self._config.translate_key} to translate | "
-            f"tap {self._config.email_key} for email | Ctrl+C quits",
+            f"tap {self._config.translate_key} to translate | Ctrl+C quits",
         )
         self._log.info("backend", f"{backend}  transcribe={transcribe_model}")
         if self._translator is None:
@@ -155,10 +153,6 @@ class WhispererApp:
         self._rewrite_mode = "translate"
         self._log.info("mode", "translate")
 
-    def _request_email(self) -> None:
-        self._rewrite_mode = "email"
-        self._log.info("mode", "email")
-
     def _process_recording(
         self, audio: np.ndarray, rewrite_mode: str | None, keep_on_clipboard: bool
     ) -> None:
@@ -204,19 +198,13 @@ class WhispererApp:
         if self._translator is None:
             self._log.warn("rewrite", f"{mode} skipped (no OpenAI API key)")
             return transcript
-        prompt = self._prompt_for_mode(mode)
         self._log.info("rewrite", f"{mode}  sending to {self._config.translation_model}")
         started = time.perf_counter()
-        rewritten = self._translator.rewrite(transcript, prompt)
+        rewritten = self._translator.rewrite(transcript, self._config.translation_system_prompt)
         elapsed = time.perf_counter() - started
         self._log.info("rewritten", f"{mode}  {elapsed:.1f}s  {len(rewritten)} chars")
         self._log.text(rewritten)
         return rewritten
-
-    def _prompt_for_mode(self, mode: str) -> str:
-        if mode == "email":
-            return self._config.email_system_prompt
-        return self._config.translation_system_prompt
 
     def _paste_or_skip(self, transcript: str, keep_on_clipboard: bool) -> None:
         if not transcript:

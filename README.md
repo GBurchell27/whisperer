@@ -48,7 +48,6 @@ whisperer --local    # transcribe offline with faster-whisper
 
 - **Press Ctrl+M** to start recording; **press Ctrl+M again** to stop, transcribe, and paste at your cursor. Either Ctrl key works; releasing the keys leaves recording on.
 - **Tap right Shift while recording** to translate the transcript (Quebec French by default).
-- **Tap E while recording** to rewrite the transcript as a succinct email.
 - Transcripts stay on the clipboard after pasting, so **Ctrl+V** can recover a failed paste. Set `restore_clipboard = true` to restore your previous clipboard instead. With restoration enabled, **quickly toggle recording on and off** (under 0.5 seconds) to keep the next transcript.
 - Say **"New paragraph."** to insert a blank line.
 - Recordings shorter than 1 second are discarded.
@@ -92,7 +91,7 @@ that another application actually inserted the text. Optional clipboard restorat
 leaves anything you copied during the paste alone.
 
 For slow recordings, look for the console's `timing` line after processing:
-`total=3.3s  transcription=3.2s  paste=0.1s`. Email/translation also shows a
+`total=3.3s  transcription=3.2s  paste=0.1s`. Translation also shows a
 `rewrite` time. These times measure the wait after recording stops, excluding
 time spent speaking. Windows console QuickEdit is disabled while Whisperer runs
 to prevent accidental text selection from pausing output before the paste.
@@ -112,7 +111,6 @@ Copy `whisperer.toml.example` to `whisperer.toml` in the directory you run from 
 ```toml
 record_key = "<ctrl>+m"
 translate_key = "shift_r"
-email_key = "e"
 sample_rate = 16000
 min_duration_seconds = 1.0
 tap_duration_seconds = 0.5
@@ -125,14 +123,13 @@ use_local_backend = false
 transcription_prompt = ""
 transcription_chunk_seconds = 30.0
 translation_system_prompt = "You translate the input text to Quebec French using 'vous'. You only output the text and nothing else."
-email_system_prompt = "Turn the spoken transcript into a succinct email. Output only a one-line subject prefixed with 'Subject: ', a blank line, and a short body of at most a few sentences. Do not add a greeting, sign-off, or commentary unless the speaker included one. Preserve the speaker's intent, names, facts, and requests. Be concise."
 ```
 
 The recording shortcut uses pynput hotkey syntax (`<ctrl>+m`, `<alt>+r`, …), a single pynput key name (`ctrl_r`, `f13`, …), or a single character. Recording always toggles on each press. The translation key is a pynput key name or a single character.
 
 After changing the code or settings, close any running Whisperer console and launch `MyWhisper` again from Win+R.
 
-Rewrite uses OpenAI [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) (`gpt-5.6-luna`) by default — the cost-optimized GPT-5.6 tier. `rewrite_reasoning_effort` can be `none`, `low`, `medium`, `high`, `xhigh`, or `max`. Use `low` for fast email/translate; set it to `""` if you switch `translation_model` back to a non-reasoning model such as `gpt-4o-mini`.
+Translation uses OpenAI [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) (`gpt-5.6-luna`) by default — the cost-optimized GPT-5.6 tier. `rewrite_reasoning_effort` can be `none`, `low`, `medium`, `high`, `xhigh`, or `max`. Use `low` for fast translation; set it to `""` if you switch `translation_model` back to a non-reasoning model such as `gpt-4o-mini`.
 
 ## Notes
 

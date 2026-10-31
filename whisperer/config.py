@@ -18,7 +18,6 @@ class WhispererConfig:
 
     record_key: str = "<ctrl>+m"
     translate_key: str = "shift_r"
-    email_key: str = "e"
     sample_rate: int = 16000
     min_duration_seconds: float = 1.0
     tap_duration_seconds: float = 0.5
@@ -32,13 +31,6 @@ class WhispererConfig:
     translation_system_prompt: str = (
         "You translate the input text to Quebec French using 'vous'. "
         "You only output the text and nothing else."
-    )
-    email_system_prompt: str = (
-        "Turn the spoken transcript into a succinct email. "
-        "Output only a one-line subject prefixed with 'Subject: ', a blank line, "
-        "and a short body of at most a few sentences. "
-        "Do not add a greeting, sign-off, or commentary unless the speaker included one. "
-        "Preserve the speaker's intent, names, facts, and requests. Be concise."
     )
     use_local_backend: bool = False
 
