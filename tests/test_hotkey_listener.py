@@ -227,18 +227,18 @@ class HotkeyListenerTests(unittest.TestCase):
                 self.listener._win32_event_filter(0x101, Mock(vkCode=77))
 
     @unittest.skipUnless(sys.platform == "win32", "Windows pynput dispatch ordering")
-    def test_suppression_happens_after_pynput_queues_its_own_callback(self):
-        # This exercises the installed pynput handler: suppressing in its filter
-        # would abort before _message_loop.post and silently break Ctrl+M.
+    def test_callback_and_suppression_share_event_order_without_a_second_queue(self):
+        # Exercise the installed pynput handler without installing a global hook.
         listener = _SelectiveListener()
         listener._message_loop = Mock()
         events = []
-        listener._message_loop.post.side_effect = lambda *args: events.append("queued")
+        listener._process = lambda *args: events.append("callback")
+        listener._event_filter = lambda *args: setattr(listener, "suppress_current_event", True)
         listener.suppress_event = lambda: events.append("suppressed")
-        listener.suppress_current_event = True
-        with patch.object(listener, "_convert", return_value=(0x100, 77)):
-            listener._handler(0, 0x100, None)
-        self.assertEqual(events, ["queued", "suppressed"])
+        data = listener._KBDLLHOOKSTRUCT(vkCode=77)
+        listener._handler(0, 0x100, ctypes.byref(data))
+        self.assertEqual(events, ["callback", "suppressed"])
+        listener._message_loop.post.assert_not_called()
 
     @unittest.skipUnless(sys.platform == "win32", "Windows native hook conversion")
     def test_paste_cannot_restart_recording_even_with_a_missing_m_release(self):
@@ -279,6 +279,118 @@ class HotkeyListenerTests(unittest.TestCase):
             ))
             self.assertFalse(self.listener._listener.suppress_current_event)
             self.assertEqual(self.listener._pressed_vks, set())
+
+    def native_keyboard(self):
+        """Drive the installed Windows handler without installing a global hook."""
+        native = _SelectiveListener(
+            on_press=self.listener._on_press,
+            on_release=self.listener._on_release,
+            win32_event_filter=self.listener._win32_event_filter,
+        )
+        self.listener._listener = native
+        native._message_loop = Mock()
+        native.suppress_event = lambda: None
+        windows_held = set()
+        self.listener._get_key_state = lambda vk: 0x8000 if vk in windows_held else 0
+
+        def event(msg, vk, flags=0):
+            data = native._KBDLLHOOKSTRUCT(vkCode=vk, flags=flags)
+            native._handler(0, msg, ctypes.byref(data))
+            suppressed = native.suppress_current_event
+            # Windows updates async state after the hook, for forwarded events.
+            if not suppressed:
+                if msg in (0x100, 0x104):
+                    windows_held.add(vk)
+                else:
+                    windows_held.discard(vk)
+            return suppressed
+
+        return event, windows_held
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows native hook conversion")
+    def test_missing_ctrl_release_cannot_swallow_plain_m_with_microphone_off(self):
+        event, windows_held = self.native_keyboard()
+        for ctrl in (0xA2, 0xA3):
+            with self.subTest(ctrl=ctrl):
+                for msg, vk in (
+                    (0x100, ctrl), (0x100, 77), (0x101, 77),
+                    (0x100, 77), (0x101, 77),
+                ):
+                    event(msg, vk)
+                self.assertFalse(self.listener._recording)
+                windows_held.discard(ctrl)  # Windows saw Ctrl-up; our hook missed it.
+                self.assertFalse(event(0x100, 77), "Plain M was swallowed after a lost Ctrl-up")
+                self.assertFalse(event(0x101, 77))
+                self.assertFalse(self.listener._recording)
+        self.assertEqual(self.start.call_count, 2)
+        self.assertEqual(self.stop.call_count, 2)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows native hook conversion")
+    def test_missing_m_release_does_not_consume_next_plain_m(self):
+        event, _ = self.native_keyboard()
+        for msg, vk in (
+            (0x100, 0xA2), (0x100, 77), (0x101, 77), (0x101, 0xA2),
+            (0x100, 0xA2), (0x100, 77), (0x101, 0xA2),
+        ):
+            event(msg, vk)  # No M-up on the stop shortcut.
+        self.assertFalse(self.listener._recording)
+        self.assertFalse(event(0x100, 77), "Stale shortcut suppression swallowed plain M")
+        self.assertFalse(event(0x101, 77))
+        self.start.assert_called_once_with()
+        self.stop.assert_called_once_with()
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows native hook conversion")
+    def test_either_control_can_release_while_the_other_still_holds_the_shortcut(self):
+        for first, second in ((0xA2, 0xA3), (0xA3, 0xA2)):
+            with self.subTest(first=first):
+                event, windows_held = self.native_keyboard()
+                for msg, vk in (
+                    (0x100, first), (0x100, second), (0x100, 77), (0x101, 77),
+                    (0x101, first), (0x100, 77), (0x101, 77), (0x101, second),
+                ):
+                    event(msg, vk)
+                self.assertFalse(self.listener._recording)
+                self.assertEqual(windows_held, set())
+        self.assertEqual(self.start.call_count, 2)
+        self.assertEqual(self.stop.call_count, 2)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows native hook conversion")
+    def test_many_dictations_with_dropped_releases_keep_typing_and_paste_available(self):
+        event, windows_held = self.native_keyboard()
+        for cycle in range(1000):
+            ctrl = 0xA2 if cycle % 2 else 0xA3
+            for msg, vk in (
+                (0x100, ctrl), (0x100, 77), (0x101, 77), (0x101, ctrl),
+                (0x100, ctrl), (0x100, 77),
+            ):
+                event(msg, vk)
+            # Alternate losing Ctrl-up, M-up, or both after stopping recording.
+            if cycle % 3 == 0:
+                event(0x101, 77)
+                windows_held.discard(ctrl)
+            elif cycle % 3 == 1:
+                event(0x101, ctrl)
+            else:
+                windows_held.discard(ctrl)
+            for msg, vk in ((0x100, 0x11), (0x100, 86), (0x101, 86), (0x101, 0x11)):
+                self.assertFalse(event(msg, vk, 0x10), f"Injected paste consumed on cycle {cycle}")
+            self.assertFalse(self.listener._recording)
+            self.assertFalse(event(0x100, 77), f"Plain M consumed on cycle {cycle}")
+            self.assertFalse(event(0x101, 77))
+            self.assertEqual(windows_held, set())
+            self.assertEqual(self.listener._pressed_vks, set())
+            self.assertEqual(self.listener._consumed_vks, set())
+        self.assertEqual(self.start.call_count, 1000)
+        self.assertEqual(self.stop.call_count, 1000)
+
+    def test_keyboard_input_passes_through_during_shutdown(self):
+        self.listener._listener = Mock(suppress_current_event=True)
+        self.listener._consumed_vks.add(77)
+        self.listener._stopping.set()
+        self.assertFalse(self.listener._win32_event_filter(
+            0x100, SimpleNamespace(vkCode=77, flags=0)
+        ))
+        self.assertFalse(self.listener._listener.suppress_current_event)
 
     def test_ctrl_remains_available_for_manual_paste_when_m_was_pressed_first(self):
         # Model what the target app sees, including the same held Ctrl being

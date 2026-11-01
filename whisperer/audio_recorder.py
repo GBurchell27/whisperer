@@ -29,21 +29,34 @@ class AudioRecorder:
         if self._stream is not None:
             return
         self._chunks = []
-        self._stream = sd.InputStream(
+        stream = sd.InputStream(
             callback=self._on_audio_chunk, channels=1, samplerate=self._sample_rate
         )
-        self._stream.start()
+        try:
+            stream.start()
+        except BaseException:
+            try:
+                stream.close()
+            finally:
+                self._chunks = []
+            raise
+        self._stream = stream
 
     def stop(self) -> np.ndarray:
         """Stop capturing and return the recording as a mono float32 array."""
         if self._stream is None:
             return np.zeros(0, dtype=np.float32)
-        self._stream.stop()
-        self._stream.close()
-        self._stream = None
-        if not self._chunks:
+        try:
+            try:
+                self._stream.stop()
+            finally:
+                self._stream.close()
+        finally:
+            self._stream = None
+            chunks, self._chunks = self._chunks, []
+        if not chunks:
             return np.zeros(0, dtype=np.float32)
-        return np.concatenate(self._chunks, axis=0).flatten().astype(np.float32)
+        return np.concatenate(chunks, axis=0).reshape(-1).astype(np.float32, copy=False)
 
     def _on_audio_chunk(self, indata: np.ndarray, frames, time, status) -> None:
         if status and self._on_status:

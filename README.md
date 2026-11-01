@@ -77,6 +77,13 @@ waiting for microphone work to finish. A failed action stops the hook and report
 the original error. Ctrl remains available for other shortcuts even if you press
 M before Ctrl while toggling recording.
 
+Whisperer checks for missed modifier releases against Windows' current key state
+and clears stale shortcut suppression before forwarding ordinary typing. Shortcut
+state and suppression are handled in the same event order, so a delayed callback
+cannot leave M intercepted while the microphone is off. Stopped recordings release
+their captured audio buffers immediately; microphone failures still close the
+stream and clear the recording indicator.
+
 Automatic paste waits for you to release the recording shortcut, V, and modifier
 keys. If a key stays held for more
 than three seconds, the transcript stays on the clipboard for a manual Ctrl+V.

@@ -96,8 +96,10 @@ class WhispererApp:
         self._log.info("record", "started")
 
     def _stop_recording(self) -> None:
-        audio = self._recorder.stop()
-        self._status.set_recording(False)
+        try:
+            audio = self._recorder.stop()
+        finally:
+            self._status.set_recording(False)
         duration_seconds = len(audio) / self._config.sample_rate
         if duration_seconds < self._config.tap_duration_seconds:
             self._keep_next_on_clipboard = True

@@ -86,6 +86,13 @@ class AppIndicatorTests(unittest.TestCase):
         self.app._process_recording(np.zeros(self.config.sample_rate), False)
         self.assertEqual(self.app._status.state, "error")
 
+    def test_failed_microphone_stop_clears_listening_indicator(self):
+        self.app._start_recording()
+        self.recorder.stop.side_effect = RuntimeError("Device disconnected")
+        with self.assertRaisesRegex(RuntimeError, "Device disconnected"):
+            self.app._stop_recording()
+        self.assertEqual(self.app._status.state, "idle")
+
     def test_closing_overlay_stops_hotkeys_and_microphone(self):
         with patch("whisperer.app.HotkeyListener") as listener, patch(
             "whisperer.app.StatusBubble"

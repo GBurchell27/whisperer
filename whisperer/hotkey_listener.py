@@ -14,15 +14,17 @@ _MODIFIER_VKS = {
     0xA3: 0x11, 0xA4: 0x12, 0xA5: 0x12, 0x5C: 0x5B,
 }
 _MODIFIERS = {Key.ctrl, Key.alt, Key.shift, Key.cmd}
-_MODIFIER_CODES = {0x10, 0x11, 0x12, 0x5B}
+_MODIFIER_KEYS = {0x10: Key.shift, 0x11: Key.ctrl, 0x12: Key.alt, 0x5B: Key.cmd}
+_MODIFIER_CODES = set(_MODIFIER_KEYS)
 
 
 class _SelectiveListener(Listener):
-    """Let pynput dispatch a hotkey before suppressing it in other apps.
+    """Handle each event before making its suppression decision final.
 
-    Calling suppress_event() inside win32_event_filter raises before pynput
-    queues its own callback. The Windows listener checks this property after
-    queuing the callback, so the shortcut both works and stays out of the editor.
+    Keep hotkey callbacks in the hook's event order. Posting them to a second
+    queue lets suppression run ahead of shortcut state and release recovery.
+    Callbacks only update key state and enqueue actions; audio and logging stay
+    on the action worker. Returning None prevents duplicate queued callbacks.
     """
 
     suppress_current_event = False
@@ -35,7 +37,10 @@ class _SelectiveListener(Listener):
         # pynput also checks suppress after conversions that skip the filter
         # (e.g. negative hook codes). Never reuse the last key's decision.
         self.suppress_current_event = False
-        return super()._convert(code, msg, lpdata)
+        converted = super()._convert(code, msg, lpdata)
+        if converted is not None:
+            self._process(*converted)
+        return None
 
 
 def parse_key(key_name: str) -> Key | KeyCode:
@@ -116,6 +121,7 @@ class HotkeyListener:
         }
         self._pressed_vks: set[int] = set()
         self._consumed_vks: set[int] = set()
+        self._get_key_state: Callable[[int], int] | None = None
         self._on_record_start = on_record_start
         self._on_record_stop = on_record_stop
         self._recording_taps = dict(recording_taps or {})
@@ -158,6 +164,11 @@ class HotkeyListener:
             "on_release": self._on_release,
         }
         if sys.platform == "win32":
+            import ctypes
+
+            self._get_key_state = ctypes.WinDLL("user32").GetAsyncKeyState
+            self._get_key_state.argtypes = [ctypes.c_int]
+            self._get_key_state.restype = ctypes.c_short
             listener_kwargs["win32_event_filter"] = self._win32_event_filter
         listener_factory = _SelectiveListener if sys.platform == "win32" else Listener
         self._listener = listener_factory(**listener_kwargs)
@@ -204,6 +215,9 @@ class HotkeyListener:
                 self._callback_worker.join()
                 self._callback_worker = None
                 self._callbacks = None
+            self._recording = False
+            self._pressed_vks.clear()
+            self._consumed_vks.clear()
 
     def _dispatch(self, callback: Callable[[], None]) -> None:
         if self._stopping.is_set():
@@ -247,6 +261,13 @@ class HotkeyListener:
     def _on_release(self, key: Key | KeyCode | None) -> None:
         if key is not None:
             normalized = self._normalize_key(key)
+            if normalized in _MODIFIERS and any(
+                _MODIFIER_VKS.get(vk, vk) == virtual_key_code(normalized)
+                for vk in self._pressed_vks
+            ):
+                # Both Ctrl keys can be held together. Releasing one side must
+                # not disarm the shortcut while the other side is still down.
+                return
             self._record_hotkey.release(normalized)
             if normalized in _MODIFIERS and normalized in self._record_keys:
                 # Completing a chord by releasing its modifier must not leave
@@ -292,14 +313,30 @@ class HotkeyListener:
         # Return False skips pynput's callbacks, while leaving the input free to
         # reach the target application. Never let our simulated Ctrl+V (or a
         # clipboard utility's injected keys) change physical hotkey state.
+        if self._listener is not None:
+            self._listener.suppress_current_event = False
         flags = getattr(data, "flags", 0)
-        if isinstance(flags, int) and flags & 0x10:  # LLKHF_INJECTED
-            if self._listener is not None:
-                self._listener.suppress_current_event = False
+        if self._stopping.is_set() or (isinstance(flags, int) and flags & 0x10):  # LLKHF_INJECTED
+            return False
+        if _msg not in (0x0100, 0x0104, 0x0101, 0x0105):
             return False
         vk = data.vkCode
         # Windows reports left/right modifier VKs; HotKey.parse uses generic VKs.
         canonical_vk = _MODIFIER_VKS.get(vk, vk)
+        self._release_stale_modifiers(vk)
+        pressed = {_MODIFIER_VKS.get(key, key) for key in self._pressed_vks}
+        if (
+            _msg in (0x0100, 0x0104)
+            and vk in self._consumed_vks
+            and canonical_vk not in _MODIFIER_CODES
+            and not (self._record_vks & _MODIFIER_CODES) <= pressed
+        ):
+            # A consumed M-up can be lost too. Once its shortcut modifiers are
+            # gone, an ordinary M-down must be forwarded, even if it looks like
+            # auto-repeat. Keep suppressing the paired up if no new down arrives.
+            self._consumed_vks.discard(vk)
+            self._pressed_vks.discard(vk)
+            self._record_hotkey.release(self._normalize_key(KeyCode.from_vk(vk)))
         suppress = vk in self._consumed_vks
         if _msg in (0x0100, 0x0104):  # WM_KEYDOWN / WM_SYSKEYDOWN
             repeated = vk in self._pressed_vks
@@ -330,3 +367,21 @@ class HotkeyListener:
         if self._listener is not None:
             self._listener.suppress_current_event = suppress
         return True
+
+    def _release_stale_modifiers(self, current_vk: int) -> None:
+        if self._get_key_state is None:
+            return
+        for vk in tuple(self._pressed_vks):
+            canonical_vk = _MODIFIER_VKS.get(vk, vk)
+            if (
+                vk == current_vk
+                or canonical_vk not in _MODIFIER_CODES
+                or vk in self._consumed_vks
+            ):
+                continue
+            # The current event has not updated async state yet. Only reconcile
+            # OTHER, forwarded modifiers: suppressed keys never reach that state.
+            # https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
+            if not self._get_key_state(vk) & 0x8000:
+                self._pressed_vks.discard(vk)
+                self._on_release(_MODIFIER_KEYS[canonical_vk])
