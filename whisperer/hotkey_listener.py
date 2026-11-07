@@ -107,6 +107,7 @@ class HotkeyListener:
         on_record_start: Callable[[], None],
         on_record_stop: Callable[[], None],
         recording_taps: Mapping[Key | KeyCode, Callable[[], None]] | None = None,
+        shortcuts: Mapping[str, Callable[[], None]] | None = None,
     ) -> None:
         record_keys = (
             HotKey.parse(record_key) if "+" in record_key else [parse_key(record_key)]
@@ -119,6 +120,15 @@ class HotkeyListener:
             vk for key in record_keys
             if (vk := virtual_key_code(self._normalize_key(key))) is not None
         }
+        self._hotkeys = [(self._record_keys, self._record_hotkey, self._record_vks)]
+        for shortcut, callback in (shortcuts or {}).items():
+            parsed = HotKey.parse(shortcut) if "+" in shortcut else [parse_key(shortcut)]
+            keys = {self._normalize_key(key) for key in parsed}
+            if any(keys == existing for existing, _, _ in self._hotkeys):
+                raise ValueError(f"Duplicate hotkey: {shortcut}")
+            hotkey = HotKey(keys, lambda action=callback: self._dispatch(action))
+            vks = {vk for key in keys if (vk := virtual_key_code(key)) is not None}
+            self._hotkeys.append((keys, hotkey, vks))
         self._pressed_vks: set[int] = set()
         self._consumed_vks: set[int] = set()
         self._get_key_state: Callable[[int], int] | None = None
@@ -157,8 +167,9 @@ class HotkeyListener:
         self._pressed_vks.clear()
         self._consumed_vks.clear()
         self._recording = False
-        for key in self._record_keys:
-            self._record_hotkey.release(key)
+        for keys, hotkey, _ in self._hotkeys:
+            for key in keys:
+                hotkey.release(key)
         listener_kwargs: dict = {
             "on_press": self._on_press,
             "on_release": self._on_release,
@@ -251,7 +262,8 @@ class HotkeyListener:
     def _on_press(self, key: Key | KeyCode | None) -> None:
         if key is None:
             return
-        self._record_hotkey.press(self._normalize_key(key))
+        for _, hotkey, _ in self._hotkeys:
+            hotkey.press(self._normalize_key(key))
         if self._recording:
             for tap_key, callback in self._recording_taps.items():
                 if keys_match(key, tap_key):
@@ -268,13 +280,12 @@ class HotkeyListener:
                 # Both Ctrl keys can be held together. Releasing one side must
                 # not disarm the shortcut while the other side is still down.
                 return
-            self._record_hotkey.release(normalized)
-            if normalized in _MODIFIERS and normalized in self._record_keys:
-                # Completing a chord by releasing its modifier must not leave
-                # a stale M behind if Windows dropped/delayed that key's up.
-                # The next chord needs a fresh letter press, not Ctrl alone.
-                for record_key in self._record_keys - _MODIFIERS:
-                    self._record_hotkey.release(record_key)
+            for keys, hotkey, _ in self._hotkeys:
+                hotkey.release(normalized)
+                if normalized in _MODIFIERS and normalized in keys:
+                    # A missed letter-up must not let Ctrl alone activate.
+                    for letter in keys - _MODIFIERS:
+                        hotkey.release(letter)
 
     def _toggle_recording(self) -> None:
         if self._recording:
@@ -329,14 +340,18 @@ class HotkeyListener:
             _msg in (0x0100, 0x0104)
             and vk in self._consumed_vks
             and canonical_vk not in _MODIFIER_CODES
-            and not (self._record_vks & _MODIFIER_CODES) <= pressed
+            and not any(
+                canonical_vk in vks and (vks & _MODIFIER_CODES) <= pressed
+                for _, _, vks in self._hotkeys
+            )
         ):
             # A consumed M-up can be lost too. Once its shortcut modifiers are
             # gone, an ordinary M-down must be forwarded, even if it looks like
             # auto-repeat. Keep suppressing the paired up if no new down arrives.
             self._consumed_vks.discard(vk)
             self._pressed_vks.discard(vk)
-            self._record_hotkey.release(self._normalize_key(KeyCode.from_vk(vk)))
+            for _, hotkey, _ in self._hotkeys:
+                hotkey.release(self._normalize_key(KeyCode.from_vk(vk)))
         suppress = vk in self._consumed_vks
         if _msg in (0x0100, 0x0104):  # WM_KEYDOWN / WM_SYSKEYDOWN
             repeated = vk in self._pressed_vks
@@ -348,11 +363,10 @@ class HotkeyListener:
             # Pressing M before Ctrl must not consume Ctrl: the user may keep
             # holding that same Ctrl for Ctrl+V (or any other application key).
             # A shortcut configured as a single modifier still consumes it.
-            modifier_in_chord = canonical_vk in _MODIFIER_CODES and len(self._record_vks) > 1
-            shortcut = (
-                not modifier_in_chord
-                and canonical_vk in self._record_vks
-                and self._record_vks <= pressed
+            shortcut = any(
+                not (canonical_vk in _MODIFIER_CODES and len(vks) > 1)
+                and canonical_vk in vks and vks <= pressed
+                for _, _, vks in self._hotkeys
             )
             tap = self._recording and vk in self._suppressed_vks
             if not repeated and (shortcut or tap):

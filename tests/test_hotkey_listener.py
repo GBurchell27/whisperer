@@ -102,6 +102,40 @@ class HotkeyListenerTests(unittest.TestCase):
         self.listener._on_release(None)
         self.start.assert_not_called()
 
+    def test_video_shortcut_is_independent_and_does_not_repeat(self):
+        video = Mock()
+        listener = HotkeyListener("<ctrl>+m", self.start, self.stop,
+                                  shortcuts={"<ctrl>+p": video})
+        for ctrl in (Key.ctrl_l, Key.ctrl_r):
+            listener._on_press(ctrl)
+            for _ in range(5):
+                listener._on_press(KeyCode.from_char("p", vk=80))
+            listener._on_release(ctrl)  # Deliberately lose P-up.
+            listener._on_press(ctrl)
+            listener._on_release(ctrl)
+        self.assertEqual(video.call_count, 2)
+        self.start.assert_not_called()
+        self.stop.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows native hook conversion")
+    def test_video_shortcut_consumes_print_but_recovers_after_a_lost_release(self):
+        video = Mock()
+        self.listener = HotkeyListener("<ctrl>+m", self.start, self.stop,
+                                       shortcuts={"<ctrl>+p": video})
+        event, windows_held = self.native_keyboard()
+        self.assertFalse(event(0x100, 0xA2))
+        self.assertTrue(event(0x100, 80))
+        self.assertTrue(event(0x100, 80))  # Auto-repeat is consumed without re-opening.
+        windows_held.discard(0xA2)  # Lose Ctrl-up and P-up.
+        self.assertFalse(event(0x100, 80))  # Plain typing must recover.
+        self.assertFalse(event(0x101, 80))
+        self.assertFalse(event(0x100, 0xA3))
+        self.assertTrue(event(0x100, 77))
+        self.assertTrue(event(0x101, 77))
+        self.assertFalse(event(0x101, 0xA3))
+        video.assert_called_once_with()
+        self.start.assert_called_once_with()
+
     def test_recording_tap_suppression_remains_active_after_key_release(self):
         self.listener._listener = Mock()
         event = SimpleNamespace(vkCode=Key.shift_r.value.vk, flags=0)

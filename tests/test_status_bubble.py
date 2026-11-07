@@ -5,10 +5,33 @@ import numpy as np
 
 from whisperer.app import WhispererApp
 from whisperer.config import WhispererConfig
-from whisperer.status_bubble import DictationStatus
+from whisperer.status_bubble import DictationStatus, StatusBubble
 
 
 class DictationStatusTests(unittest.TestCase):
+    def test_video_progress_remains_available_during_dictation(self):
+        status = DictationStatus()
+        for phase in ("starting", "recording", "saving"):
+            status.set_video_phase(phase)
+            self.assertEqual(status.state, "video" if phase == "recording" else f"video_{phase}")
+            status.set_recording(True)
+            self.assertEqual(status.state, "recording")
+            self.assertEqual(status.video_phase, phase)
+            status.set_recording(False)
+        status.set_video_phase("saved")
+        self.assertEqual(status.state, "idle")
+
+    def test_video_recording_never_displays_mic_off_or_hides_active_dictation(self):
+        status = DictationStatus()
+        status.set_video_recording(True)
+        self.assertEqual(status.state, "video")
+        status.set_recording(True)
+        self.assertEqual(status.state, "recording")
+        status.set_video_recording(False)
+        self.assertEqual(status.state, "recording")
+        status.set_recording(False)
+        self.assertEqual(status.state, "idle")
+
     def test_new_recording_takes_priority_over_older_processing(self):
         status = DictationStatus()
         self.assertEqual(status.state, "idle")
@@ -42,6 +65,38 @@ class DictationStatusTests(unittest.TestCase):
         self.assertEqual(status.state, "recording")
         status.set_recording(False)
         self.assertEqual(status.state, "idle")
+
+
+class StatusBubbleControlTests(unittest.TestCase):
+    def test_shortcuts_and_video_stop_stay_visible_while_dictating(self):
+        import tkinter as tk
+
+        status = DictationStatus()
+        try:
+            bubble = StatusBubble(status, "<ctrl>+m", "<alt>+p", Mock())
+        except tk.TclError:
+            self.skipTest("Tk desktop unavailable")
+        try:
+            for phase, action in (("idle", "Open screen recorder"),
+                                  ("recording", "Stop & save video"),
+                                  ("saving", "Saving video…")):
+                status.set_video_phase(phase)
+                status.set_recording(True)
+                bubble._draw()
+                text = [bubble._canvas.itemcget(item, "text")
+                        for item in bubble._canvas.find_all()
+                        if bubble._canvas.type(item) == "text"]
+                self.assertIn("CTRL+M · Finish dictation", text)
+                self.assertIn(f"ALT+P · {action}", text)
+                for item in bubble._canvas.find_all():
+                    if bubble._canvas.type(item) == "text":
+                        left, top, right, bottom = bubble._canvas.bbox(item)
+                        self.assertGreaterEqual(left, 0)
+                        self.assertGreaterEqual(top, 0)
+                        self.assertLessEqual(right, bubble.WIDTH)
+                        self.assertLessEqual(bottom, bubble.HEIGHT)
+        finally:
+            bubble.close()
 
 
 class AppIndicatorTests(unittest.TestCase):

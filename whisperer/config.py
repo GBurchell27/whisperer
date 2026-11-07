@@ -24,6 +24,8 @@ class WhispererConfig:
     """All tunable settings; every field can be overridden in whisperer.toml."""
 
     record_key: str = "<ctrl>+m"
+    video_key: str = "<ctrl>+p"
+    video_output_dir: str = "~/Videos/Whisperer"
     sample_rate: int = 16000
     min_duration_seconds: float = 1.0
     tap_duration_seconds: float = 0.5

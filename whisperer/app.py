@@ -40,29 +40,38 @@ class WhispererApp:
         self._log = logger
         self._keep_next_on_clipboard = False
         self._status = DictationStatus()
+        self._video_requested = threading.Event()
+        self._video_window = None
+        self._last_video_phase = "idle"
 
     def run(self, *, show_overlay: bool = True) -> None:
-        listener = HotkeyListener(
-            record_key=self._config.record_key,
-            on_record_start=self._start_recording,
-            on_record_stop=self._stop_recording,
-        )
         self._log_startup()
         bubble = None
         if show_overlay:
             try:
-                bubble = StatusBubble(self._status, self._config.record_key)
+                bubble = StatusBubble(
+                    self._status, self._config.record_key, self._config.video_key,
+                    self._video_requested.set,
+                )
             except (ImportError, RuntimeError) as error:
                 self._log.warn("indicator", f"unavailable: {error}")
             except Exception as error:
                 # Tk can be installed but unavailable (e.g. no desktop display).
                 self._log.warn("indicator", f"could not open: {error}")
+        listener = HotkeyListener(
+            record_key=self._config.record_key,
+            on_record_start=self._start_recording,
+            on_record_stop=self._stop_recording,
+            shortcuts={self._config.video_key: self._video_requested.set} if bubble is not None else None,
+        )
+        if bubble is not None:
+            self._log.info("video", f"press {self._config.video_key} to open the screen recorder")
         try:
             if bubble is None:
                 listener.run()
             else:
                 listener.start()
-                bubble.run(listener.check)
+                bubble.run(lambda: self._poll_tools(listener, bubble))
         except KeyboardInterrupt:
             pass
         finally:
@@ -73,8 +82,38 @@ class WhispererApp:
                     self._recorder.stop()
                 finally:
                     self._status.set_recording(False)
-                    if bubble is not None:
-                        bubble.close()
+                    self._status.set_video_recording(False)
+                    try:
+                        if self._video_window is not None:
+                            self._video_window.close()
+                    finally:
+                        if bubble is not None:
+                            bubble.close()
+
+    def _poll_tools(self, listener: HotkeyListener, bubble: StatusBubble) -> None:
+        listener.check()
+        if self._video_requested.is_set():
+            self._video_requested.clear()
+            try:
+                if self._video_window is None:
+                    from whisperer.recorder_window import RecorderWindow
+
+                    self._video_window = RecorderWindow(
+                        bubble.root, self._config.video_output_dir, self._config.video_key,
+                    )
+                self._video_window.toggle()
+            except Exception as error:
+                self._log.error("video", f"Could not open recorder: {error}. Run python -m pip install -e .")
+        if self._video_window is not None:
+            self._video_window.poll()
+            state = self._video_window.recorder.snapshot
+            self._status.set_video_phase(state.phase)
+            if state.phase != self._last_video_phase:
+                self._last_video_phase = state.phase
+                if state.phase == "saved":
+                    self._log.info("video", f"saved {state.path}")
+                elif state.phase == "error":
+                    self._log.error("video", state.error)
 
     def _log_startup(self) -> None:
         backend = "local" if self._config.use_local_backend else "openai"
@@ -222,6 +261,15 @@ def _build_transcriber(
 
 def main() -> None:
     arguments = _parse_arguments()
+    if sys.platform == "win32":
+        # Set before Tk creates any windows; all screen/mouse coordinates then
+        # agree even with mixed-DPI or negative-coordinate monitors.
+        import ctypes
+
+        try:
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        except (AttributeError, OSError):
+            pass
     logger = ConsoleLogger()
     if CONFIG_FILE.exists():
         logger.info("config", f"loaded {CONFIG_FILE.resolve()}")

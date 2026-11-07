@@ -19,6 +19,7 @@ class DictationStatus:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._recording = False
+        self._video_phase = "idle"
         self._pending = 0
         self._error_until = 0.0
 
@@ -32,6 +33,18 @@ class DictationStatus:
         with self._lock:
             self._pending += 1
 
+    def set_video_recording(self, recording: bool) -> None:
+        self.set_video_phase("recording" if recording else "idle")
+
+    def set_video_phase(self, phase: str) -> None:
+        with self._lock:
+            self._video_phase = phase
+
+    @property
+    def video_phase(self) -> str:
+        with self._lock:
+            return self._video_phase
+
     def processing_finished(self, *, failed: bool = False) -> None:
         with self._lock:
             self._pending = max(0, self._pending - 1)
@@ -43,6 +56,10 @@ class DictationStatus:
         with self._lock:
             if self._recording:
                 return "recording"
+            if self._video_phase == "recording":
+                return "video"
+            if self._video_phase in ("starting", "saving"):
+                return f"video_{self._video_phase}"
             if self._pending:
                 return "processing"
             if time.monotonic() < self._error_until:
@@ -51,22 +68,27 @@ class DictationStatus:
 
 
 class StatusBubble:
-    """Small always-on-top bubble. Drag anywhere except the quit button."""
+    """Always-on-top status and shortcuts, with a clickable video control."""
 
-    WIDTH = 224
-    HEIGHT = 80
+    WIDTH = 376
+    HEIGHT = 108
     BACKGROUND = "#111827"
     TRANSPARENT = "#010203"
 
-    def __init__(self, status: DictationStatus, shortcut: str) -> None:
+    def __init__(
+        self, status: DictationStatus, shortcut: str,
+        video_shortcut: str, on_video_toggle: Callable[[], None],
+    ) -> None:
         # Import lazily so --no-overlay also works on Python builds without Tk.
         import tkinter as tk
 
         self._status = status
         self._shortcut = shortcut.replace("<", "").replace(">", "").upper()
+        self._video_shortcut = video_shortcut.replace("<", "").replace(">", "").upper()
+        self._on_video_toggle = on_video_toggle
         self._root = tk.Tk()
         self._root.withdraw()
-        self._root.title("Whisperer dictation")
+        self._root.title("Whisperer controls")
         self._root.overrideredirect(True)
         self._root.attributes("-topmost", True)
         self._root.configure(bg=self.TRANSPARENT)
@@ -79,6 +101,7 @@ class StatusBubble:
         self._drag_origin: tuple[int, int, int, int] | None = None
         self._closed = False
         self._last_state: str | None = None
+        self._last_video_phase: str | None = None
         self._native = None
         self._hwnd = None
         self._x = self._y = 0
@@ -94,8 +117,9 @@ class StatusBubble:
         self._canvas.bind("<ButtonPress-1>", self._begin_drag)
         self._canvas.bind("<B1-Motion>", self._drag)
         self._canvas.bind("<ButtonRelease-1>", self._end_drag)
-        self._canvas.tag_bind("quit", "<Enter>", lambda _: self._canvas.configure(cursor="hand2"))
-        self._canvas.tag_bind("quit", "<Leave>", lambda _: self._canvas.configure(cursor="fleur"))
+        for tag in ("quit", "video_control"):
+            self._canvas.tag_bind(tag, "<Enter>", lambda _: self._canvas.configure(cursor="hand2"))
+            self._canvas.tag_bind(tag, "<Leave>", lambda _: self._canvas.configure(cursor="fleur"))
         self._root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _configure_windows(self) -> None:
@@ -133,6 +157,11 @@ class StatusBubble:
                 self._root.winfo_screenheight() - self.HEIGHT - 72,
             )
 
+    @property
+    def root(self):
+        """The main-thread Tk owner for auxiliary tool windows."""
+        return self._root
+
     def _move(self, x: int, y: int) -> None:
         self._x, self._y = x, y
         if self._native is not None:
@@ -143,8 +172,13 @@ class StatusBubble:
             self._root.geometry(f"+{max(0, x)}+{max(0, y)}")
 
     def _begin_drag(self, event) -> None:
-        if self._canvas.find_withtag("current") and "quit" in self._canvas.gettags("current"):
+        tags = self._canvas.gettags("current")
+        if "quit" in tags:
             self.close()
+            return
+        if "video_control" in tags:
+            if self._status.video_phase != "saving":
+                self._on_video_toggle()
             return
         self._drag_origin = (event.x_root, event.y_root, self._x, self._y)
 
@@ -184,7 +218,8 @@ class StatusBubble:
             self.close()
             return
         state = self._status.state
-        if state != self._last_state or state in ("recording", "processing"):
+        if (state != self._last_state or self._status.video_phase != self._last_video_phase
+                or state in ("recording", "video", "processing")):
             self._draw()
         self._root.after(40, self._tick)
 
@@ -193,20 +228,26 @@ class StatusBubble:
         canvas.delete("frame")
         state = self._status.state
         self._last_state = state
-        accent, title, subtitle = {
-            "idle": ("#94a3b8", "Mic off", f"{self._shortcut} to dictate"),
-            "recording": ("#fb7185", "Listening", f"{self._shortcut} to finish"),
-            "processing": ("#fbbf24", "Processing", "Mic off / preparing text"),
-            "error": ("#fbbf24", "Try again", "See console for details"),
+        video_phase = self._status.video_phase
+        self._last_video_phase = video_phase
+        accent, title = {
+            "idle": ("#94a3b8", "Whisperer · Mic off"),
+            "recording": ("#fb7185", "Listening"),
+            "video": ("#fb7185", "Recording screen"),
+            "video_starting": ("#fbbf24", "Starting screen recording…"),
+            "video_saving": ("#fbbf24", "Saving video…"),
+            "processing": ("#fbbf24", "Preparing dictation…"),
+            "error": ("#fbbf24", "Dictation failed · see console"),
         }[state]
         # Rounded pill drawn from circles and a rectangle, without image assets.
-        for box in ((2, 2, 78, 78), (146, 2, 222, 78)):
+        for box in ((2, 2, 106, 106), (self.WIDTH-106, 2, self.WIDTH-2, 106)):
             canvas.create_oval(*box, fill=self.BACKGROUND, outline="", tags="frame")
-        canvas.create_rectangle(40, 2, 184, 78, fill=self.BACKGROUND, outline="", tags="frame")
+        canvas.create_rectangle(54, 2, self.WIDTH-54, 106,
+                                fill=self.BACKGROUND, outline="", tags="frame")
         phase = time.monotonic() * 4.5
-        radius = 27 + (3 * (1 + math.sin(phase)) if state == "recording" else 0)
+        radius = 27 + (3 * (1 + math.sin(phase)) if state in ("recording", "video") else 0)
         canvas.create_oval(40-radius, 40-radius, 40+radius, 40+radius,
-                           fill="#3b2236" if state == "recording" else "#1e293b",
+                           fill="#3b2236" if state in ("recording", "video") else "#1e293b",
                            outline="", tags="frame")
         if state == "processing":
             canvas.create_arc(14, 14, 66, 66, start=-time.monotonic()*180 % 360,
@@ -217,18 +258,32 @@ class StatusBubble:
                           style="arc", outline=accent, width=2, tags="frame")
         canvas.create_line(40, 49, 40, 54, fill=accent, width=2, tags="frame")
         canvas.create_line(35, 54, 45, 54, fill=accent, width=2, tags="frame")
-        if state != "recording":
+        if state == "video":
+            canvas.create_oval(19, 19, 61, 61, fill="#3b2236", outline="", tags="frame")
+            canvas.create_rectangle(31, 31, 49, 49, fill=accent, outline="", tags="frame")
+        elif state != "recording":
             canvas.create_line(27, 26, 53, 55, fill=self.BACKGROUND, width=5, tags="frame")
             canvas.create_line(27, 26, 53, 55, fill=accent, width=2, tags="frame")
-        canvas.create_text(80, 29, text=title, anchor="w", fill="#f8fafc",
-                           font=("Segoe UI", 12, "bold"), tags="frame")
-        canvas.create_text(80, 51, text=subtitle, anchor="w", fill="#94a3b8",
-                           font=("Segoe UI", 8), tags="frame")
+        canvas.create_text(80, 27, text=title, anchor="w", fill="#f8fafc",
+                           font=("Segoe UI", 11, "bold"), tags="frame")
+        dictation_action = "Finish dictation" if state == "recording" else "Start dictation"
+        canvas.create_text(80, 51, text=f"{self._shortcut} · {dictation_action}",
+                           anchor="w", fill="#cbd5e1", font=("Segoe UI", 9), tags="frame")
+        video_action = {
+            "starting": "Cancel screen recording", "recording": "Stop & save video",
+            "saving": "Saving video…",
+        }.get(video_phase, "Open screen recorder")
+        video_color = "#fb7185" if video_phase == "recording" else "#93c5fd"
+        canvas.create_rectangle(73, 66, self.WIDTH-35, 92, fill="#1e293b", outline="",
+                                tags=("frame", "video_control"))
+        canvas.create_text(80, 79, text=f"{self._video_shortcut} · {video_action}",
+                           anchor="w", fill=video_color, font=("Segoe UI", 9),
+                           tags=("frame", "video_control"))
         # Keep the quit hit target stable while redrawing the animation.
         if not canvas.find_withtag("quit"):
-            canvas.create_oval(194, 11, 214, 31, fill=self.BACKGROUND,
+            canvas.create_oval(self.WIDTH-30, 11, self.WIDTH-10, 31, fill=self.BACKGROUND,
                                outline="", tags="quit")
-            canvas.create_text(204, 20, text="\u00d7", fill="#94a3b8",
+            canvas.create_text(self.WIDTH-20, 20, text="\u00d7", fill="#94a3b8",
                                font=("Segoe UI", 12), tags="quit")
         canvas.tag_raise("quit")
 

@@ -4,6 +4,10 @@
 # --- Recording shortcut ---
 record_key = "<ctrl>+m"
 
+# --- Screen recorder (Windows 10 2004+ / Windows 11) ---
+video_key = "<ctrl>+p"
+video_output_dir = "~/Videos/Whisperer"
+
 # --- Recording ---
 sample_rate = 16000
 min_duration_seconds = 1.0

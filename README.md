@@ -2,6 +2,9 @@
 
 Toggle dictation for your desktop. Press **Ctrl+M** to turn the microphone on, speak, then press **Ctrl+M** again to turn it off. The audio is then transcribed (OpenAI API or a local Whisper model) and pasted at your cursor, wherever it is.
 
+Press **Ctrl+P** for a quick screen recording with your microphone, a circular
+webcam bubble, and visible click highlights. Recordings save locally as MP4 files.
+
 ## Requirements
 
 - Python 3.11+
@@ -56,9 +59,14 @@ whisperer --local    # transcribe offline with faster-whisper
 A small always-on-top bubble appears above the taskbar at the bottom right when
 Whisperer starts, including when launched using Win+R → `MyWhisper`. Drag it to
 move it anywhere on your desktop. It stays out of the way of your typing focus.
+It always shows **Ctrl+M · Start/Finish dictation** and **Ctrl+P · Open screen
+recorder**. You can also click the screen recorder row. During capture, that row
+changes to **Ctrl+P · Stop & save video**, even if you're dictating at the same time.
 
 - **Mic off:** a quiet, crossed-out microphone; no audio is being captured.
 - **Listening:** a pink pulsing microphone while recording with Ctrl+M.
+- **Recording screen:** a pink pulsing stop icon while screen capture is active.
+- **Starting screen recording / Saving video:** the recorder is preparing or finishing the file.
 - **Processing:** an amber spinning ring while transcribing and pasting;
   the microphone is off unless you start another recording.
 - **Try again:** processing failed; see the console for details.
@@ -110,12 +118,61 @@ Set `transcription_chunk_seconds = 0` to disable splitting. The transcription pr
 defaults to empty, and digital silence is skipped to avoid inventing text from an
 example greeting. You can supply a prompt containing names or vocabulary you use.
 
+## Quick screen recordings
+
+On **Windows 10 version 2004 or newer / Windows 11**, with the normal overlay enabled:
+
+1. Press **Ctrl+P** or click the floating **Open screen recorder** control. A blue
+   border marks the selected screen; recording hasn't started yet. If you have
+   multiple monitors, choose one from the screen menu.
+2. Leave **Webcam bubble**, **Microphone**, and **Highlight clicks** on, or turn
+   off anything you don't need. Drag the webcam bubble to move it.
+3. Click **Record**. The border turns **red while capture is active**. Click
+   **Stop recording**, click **Stop & save video** in the floating controls, or
+   press **Ctrl+P** to finish. The border disappears as the MP4 is saved.
+4. The panel shows the saved file and size. **Play video** opens it in your video
+   player; **Show in folder** selects it in Explorer. Use **New recording** to
+   prepare another clip. Closing the panel while recording stops and saves it.
+
+Files go to **`~/Videos/Whisperer`** by default. They are ordinary, shareable MP4s
+with the webcam, cursor, and click ripples baked in. No upload or account is
+involved in screen recording. Audio uses the default microphone; webcam uses
+camera 0. System/desktop audio is not recorded.
+
+Videos use H.264, up to a 1280-pixel longest edge at 20 fps, and AAC microphone
+audio. Compression happens while recording, so there is no huge uncompressed
+video or slow second video compression pass. The video bitrate is capped around
+1.8 Mbps, plus 64 kbps audio: busy recordings can approach **14 MB per minute**;
+quiet screen recordings are usually smaller. Long clips can still exceed email
+attachment limits. No fixed email-size guarantee is imposed.
+
+The recorder controls and red border are excluded from the video on supported
+Windows versions; the webcam preview is composited separately. On other systems,
+screen capture is best effort and controls may be visible. If a camera or microphone
+fails, the panel reports the error; turn that option off to record the screen alone.
+Capture and encoding run off the hotkey/UI threads, and audio is streamed to disk.
+If finishing fails, the panel links to a recovery folder containing the captured
+files. Quitting Whisperer finishes an active recording before exiting.
+
+After updating, install the added capture/encoder dependencies once from the repo:
+
+```powershell
+python -m pip install -e .
+```
+
+Restart `MyWhisper` after updating. Ctrl+P overrides the usual Print shortcut while
+Whisperer is running; change `video_key` if you prefer another shortcut. The
+screen recorder is unavailable with `--no-overlay` or without Tkinter, and Ctrl+P
+then retains its normal behavior. Ctrl+M continues to control dictation.
+
 ## Configuration
 
 Copy `whisperer.toml.example` to `whisperer.toml` in the directory you run from (the repo folder if you use `MyWhisper.cmd`), then edit and restart. Every setting is optional; missing keys keep the built-in defaults.
 
 ```toml
 record_key = "<ctrl>+m"
+video_key = "<ctrl>+p"
+video_output_dir = "~/Videos/Whisperer"
 sample_rate = 16000
 min_duration_seconds = 1.0
 tap_duration_seconds = 0.5
